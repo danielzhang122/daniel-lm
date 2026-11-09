@@ -9,7 +9,7 @@
 
 ## How to use this guide
 
-**Who it's for:** someone new to AI who knows a little Python and middle-school algebra (what `y = 3x + 2` means). Nothing else is assumed. Every term is explained the first time it shows up, and there's a full glossary in [Appendix A](#appendix-a--glossary-and-acronyms).
+**Who it's for:** someone new to AI who knows a little Python and middle-school algebra (what `y = 3x + 2` means). Nothing else is assumed. Every term is explained the first time it shows up, and there's a full glossary in [Appendix A](#appendix-a-glossary-and-acronyms).
 
 **What you'll be able to do at the end:**
 1. Explain what a language model is and how it produces text.
@@ -29,11 +29,13 @@
 
 **Boxes you'll see:**
 
+> 🧒 **ELI5** ("explain like I'm five"): the big idea in everyday words, no math. Read these first if a chapter feels hard.
+
 > 💡 **Key idea**: the one thing to remember from a section.
 
-> 🧪 **Try it**: a small exercise. Do it, because that's where the learning happens.
+> 🧪 **Try it**: a small exercise. Do it, because that's where the learning happens. Answers are in [Appendix C](#appendix-c-answers-to-try-it).
 
-> ✅ **Check yourself**: quiz questions. Answers are in [Appendix C](#appendix-c--answers-to-check-yourself).
+> **Q:** quick questions to test yourself, with the answer right below.
 
 > 📁 **In the code**: where this lives in the repo.
 
@@ -72,6 +74,8 @@ The rest of this guide explains each box.
 
 ## Chapter 1: What is a language model?
 
+> 🧒 **ELI5:** Think of the word suggestions on your phone's keyboard. A language model is that same idea, trained on a huge amount of text so it gets really good at guessing the next word. To write a whole paragraph, it guesses one word, sticks it on the end, and guesses again, over and over.
+
 A **language model (LM)** is a program that has learned to answer one question:
 
 > **Given the text so far, what piece of text comes next?**
@@ -103,6 +107,8 @@ This is called **autoregressive generation**: *auto* (self) + *regressive* (feed
 
 ### 1.2 Why such a simple game makes something smart
 
+> 🧒 **ELI5:** To guess the next word well, you have to understand what you're reading, like guessing the ending of a mystery book: you can only do it if you followed the clues. Practicing this guessing billions of times forces the model to pick up grammar, facts and a bit of reasoning along the way.
+
 To guess the next word *really* well, you have to understand a lot:
 - `"The capital of France is ___"` → you need **facts**.
 - `"She dropped the glass and it ___"` → you need **common sense** (glass breaks).
@@ -120,11 +126,15 @@ Your model is a **GPT**: **G**enerative **P**re-trained **T**ransformer.
 
 > 💡 **Key idea:** A language model is a next-token guessing machine. Everything else (chatting, answering, writing) is that one skill used in a loop.
 
-> ✅ **Check yourself 1.1:** Why does a language model output a probability for *every* possible next word instead of just one word?
+> **Q: Why does a language model output a probability for *every* possible next word instead of just one word?**
+>
+> A: Because many continuations are often reasonable, and because training needs a smooth score to improve. Grading "how much probability went to the right answer" gives partial credit, so the model can get *gradually* better. Probabilities also let generation sample varied text.
 
 ---
 
 ## Chapter 2: The math toolkit (only what you need)
+
+> 🧒 **ELI5:** These are the tools in the toolbox. A **vector** is just a list of numbers, like a player's stats card (speed, strength, height). A **matrix** is a grid of numbers that turns one list into another. A **derivative** answers "if I turn this dial a tiny bit, how much does the result change?"
 
 You need five ideas. Each one is small.
 
@@ -215,13 +225,19 @@ A **gradient** is just a collection of derivatives, one per input. If a function
 
 > 💡 **Key idea:** A derivative is a sensitivity: "nudge this, and that changes by this much." Training is entirely about computing these sensitivities for every knob.
 
-> ✅ **Check yourself 2.1:** A matrix of shape `(4, 3)` multiplies (`@`) a matrix of shape `(3, 7)`. What shape comes out?
+> **Q: A matrix of shape `(4, 3)` multiplies (`@`) a matrix of shape `(3, 7)`. What shape comes out?**
 >
-> ✅ **Check yourself 2.2:** If `y = x²` and `x = 3`, is the derivative positive or negative? What does that mean in words?
+> A: `(4, 7)`. The inner 3s cancel.
+>
+> **Q: If `y = x²` and `x = 3`, is the derivative positive or negative? What does that mean in words?**
+>
+> A: `dy/dx = 2x = 6`, positive. Nudging x up makes y go up, about 6× as much.
 
 ---
 
 ## Chapter 3: How machines learn
+
+> 🧒 **ELI5:** Imagine a music mixer with millions of sliders, and you're blindfolded. Someone tells you how bad the song sounds (that's the **loss**). You nudge each slider a tiny bit in the direction that makes it sound less bad, then repeat thousands of times. That's training.
 
 ### 3.1 Knobs
 
@@ -246,6 +262,8 @@ If the guess is 6 and the answer is 10: `loss = (6 − 10)² = 16`.
 (Your language model uses a different loss called *cross-entropy*, covered in Chapter 13, but the idea is the same.)
 
 ### 3.3 Gradient descent: walking downhill
+
+> 🧒 **ELI5:** You're on a foggy hill and want to reach the bottom. You can't see far, but you can feel which way the ground slopes under your feet. Take a small step downhill, feel again, repeat. The **learning rate** is your step size: too small and it takes forever, too big and you leap right over the valley.
 
 Picture the loss as a **landscape**. Every possible knob setting is a location, and the loss is the height. Training = **getting to the lowest valley**.
 
@@ -293,13 +311,17 @@ Your project uses a *changing* learning rate (Chapter 17.6).
 
 > 🧪 **Try it 3.1:** Redo the table above with `learning_rate = 0.3`. What happens? (Hint: watch the sign of `guess − 10`.)
 
-> ✅ **Check yourself 3.1:** If a knob's gradient is `+2.0`, should the knob go up or down to reduce the loss?
+> **Q: If a knob's gradient is `+2.0`, should the knob go up or down to reduce the loss?**
+>
+> A: Down. A positive gradient means increasing the knob increases the loss, so move the opposite way.
 
 ---
 
 # PART 2: Text → Numbers
 
 ## Chapter 4: Tokenization
+
+> 🧒 **ELI5:** Computers only understand numbers, so we chop text into pieces and give each piece a number, like a secret codebook. Common words like " the" get their own piece; rare words get built from smaller pieces, the way you'd sound out a word you've never seen.
 
 ### 4.1 Why we need it
 
@@ -320,6 +342,8 @@ The model only does math on numbers, so text must become numbers. The tool that 
 Your project uses subwords, built with an algorithm called **BPE**.
 
 ### 4.3 BPE (Byte Pair Encoding): the algorithm
+
+> 🧒 **ELI5:** Start with single letters. Find the two pieces that sit next to each other most often (like "t" and "h") and glue them into one new piece, "th". Do that again and again, thousands of times, until you have a dictionary of useful chunks.
 
 **Idea:** start with single characters. Repeatedly find the **pair of neighbors that appears most often** and **glue it into a new token**. Stop when you have as many tokens as you want.
 
@@ -427,13 +451,19 @@ Two important consequences:
 
 > 💡 **Key idea:** A tokenizer is a learned dictionary of text pieces. BPE builds it by repeatedly gluing the most common pair. The model never sees letters, only token IDs.
 
-> ✅ **Check yourself 4.1:** Why is `" cat"` a different token from `"cat"`?
+> **Q: Why is `" cat"` a different token from `"cat"`?**
 >
-> ✅ **Check yourself 4.2:** Why can a byte-level tokenizer never fail to encode text?
+> A: Because the pre-splitting pattern keeps the space attached to the word, and BPE learned `" cat"` (mid-sentence) and `"cat"` (start of text or after a symbol) as separate pieces.
+>
+> **Q: Why can a byte-level tokenizer never fail to encode text?**
+>
+> A: Every possible piece of text is made of bytes, and all 256 bytes are in the base vocabulary. Worst case, each byte becomes its own token.
 
 ---
 
 ## Chapter 5: The data pipeline
+
+> 🧒 **ELI5:** Before cooking, you wash and chop the ingredients. Here we download Wikipedia, cut off junk like reference lists, turn the text into token numbers, and set aside a small pile of articles the model never practices on, so we can quiz it fairly later.
 
 > 📁 **In the code:** `prepare.py`, `cleaning.py`
 
@@ -453,13 +483,17 @@ train.bin:  [464, 3797, 3332, ..., 1(<eos>), 818, 2231, ..., 1(<eos>), ...]
             └────── article 1 ──────┘        └────── article 2 ──────┘
 ```
 
-> ✅ **Check yourself 5.1:** Why must the validation articles never be used for training?
+> **Q: Why must the validation articles never be used for training?**
+>
+> A: Val measures how well the model handles text it hasn't seen. If it trained on val, a low val loss could just mean memorization, and you'd lose your honest check.
 
 ---
 
 # PART 3: The Model
 
 ## Chapter 6: The model at a glance
+
+> 🧒 **ELI5:** The model is an assembly line. Token numbers go in one end, get turned into lists of numbers, pass through 8 identical stations (called **blocks**) that each improve them a little, and at the end out comes a score for every possible next token.
 
 Here's the whole GPT. Don't worry about the details yet. Each box gets its own chapter.
 
@@ -500,6 +534,8 @@ Important: the model predicts the next token **at every position at once**. Feed
 
 ## Chapter 7: Embeddings, turning IDs into vectors
 
+> 🧒 **ELI5:** Every token gets its own row in a big table, like a profile card with 512 numbers describing it. Words used in similar ways end up with similar cards. A second table adds "I'm word number 5 in the sentence", because word order matters.
+
 An ID like `3797` is just a label. The number 3797 isn't "bigger" than 464 in any meaningful way. So each ID is used to **look up a row** in a table.
 
 ### 7.1 Token embedding
@@ -532,11 +568,15 @@ x = token_embedding[id] + position_embedding[position]
 
 > 💡 **Key idea:** Embedding = table lookup. Each token gets a learned "meaning vector", plus a learned "position vector".
 
-> ✅ **Check yourself 7.1:** How many knobs are in the token embedding table? In the position table?
+> **Q: How many knobs are in the token embedding table? In the position table?**
+>
+> A: Token table: `16,384 × 512 = 8,388,608`. Position table: `512 × 512 = 262,144`.
 
 ---
 
 ## Chapter 8: The Linear layer
+
+> 🧒 **ELI5:** A Linear layer is a mixing recipe. Each output number is a mix of all the input numbers: "take 2 parts of this, minus half of that...". Those amounts are the knobs that training adjusts.
 
 The most common building block. It's the matrix multiplication from Chapter 2 plus an optional **bias** (a vector added at the end):
 
@@ -555,6 +595,8 @@ y = x @ W.T + b
 ---
 
 ## Chapter 9: Activation functions (GELU)
+
+> 🧒 **ELI5:** If every step only stretches and adds numbers, stacking 100 steps is no smarter than one step, the same way stacking magnifying glasses still just magnifies. GELU adds a bend: it mostly lets positive numbers through and squashes negative ones. That bend is what lets the network learn curvy, complicated patterns.
 
 ### 9.1 Why we need something that isn't a straight line
 
@@ -594,6 +636,8 @@ It's like a dimmer switch: big positive values pass almost unchanged, big negati
 
 ## Chapter 10: LayerNorm
 
+> 🧒 **ELI5:** As numbers pass through layer after layer, they can drift way too big or too small, like a photo getting over- or under-exposed. LayerNorm resets each list of numbers so its average is 0 and its spread is about 1 before the next step, which keeps learning steady.
+
 ### 10.1 The problem
 
 As numbers pass through many layers, they can drift. Some vectors get huge, others shrink to nothing, and training becomes unstable.
@@ -623,6 +667,8 @@ With gamma = 1 and beta = 0 (their starting values), `y = xhat`. The relative pa
 ---
 
 ## Chapter 11: Attention, the heart of the transformer
+
+> 🧒 **ELI5:** In "The cat sat down because it was tired", to understand "it" you have to look back at "cat". Attention lets every word look back at the earlier words and decide which ones matter. Each word asks a question (**Query**), every earlier word holds up a label saying what it has (**Key**), and the word collects information (**Value**) mostly from the words whose labels best match its question.
 
 ### 11.1 The problem attention solves
 
@@ -676,6 +722,8 @@ Token 3 "paid the most attention" to itself, because its query matched its own k
 
 ### 11.4 The causal mask: no cheating
 
+> 🧒 **ELI5:** It's a fill-in-the-blank test where you may only look at the words *before* the blank. If the model could see the words after it, it would just copy the answer and never learn anything.
+
 When training, the model is learning to predict the *next* token. If token 2 could look at token 3, it would just read the answer. So attention is **causal**: each token sees only itself and earlier tokens. Before softmax, future scores are set to **−∞** (minus infinity), and `exp(−∞) = 0` gives them 0% attention.
 
 ```
@@ -711,13 +759,19 @@ Line by line:
 
 > 💡 **Key idea:** Attention = each token asks a question (Q), every earlier token advertises what it has (K), and the token collects a weighted mix of their contents (V). It's how information moves *between* tokens. It's the only place that happens.
 
-> ✅ **Check yourself 11.1:** Why does attention use a causal mask during training?
+> **Q: Why does attention use a causal mask during training?**
 >
-> ✅ **Check yourself 11.2:** If a query has a dot product of 0 with every key, what percentages does softmax give?
+> A: Training asks every position to predict the *next* token. Without the mask, a position could look at the next token and copy it. That's cheating, and it learns nothing useful for real generation, where the future doesn't exist yet.
+>
+> **Q: If a query has a dot product of 0 with every key, what percentages does softmax give?**
+>
+> A: Equal: every score is 0 → all `exp(0)=1` → each visible token gets `1/n`. The output is the plain average of the visible Values.
 
 ---
 
 ## Chapter 12: MLP, residuals, and the full block
+
+> 🧒 **ELI5:** After attention gathers information from other words, the **MLP** is each word's private thinking time to work through what it gathered. The **residual connection** is a shortcut: each block adds its changes on top of what came in instead of replacing it, like editing a draft rather than rewriting it from scratch.
 
 ### 12.1 The MLP: thinking about what you gathered
 
@@ -772,6 +826,8 @@ This "normalize, then do the thing, then add back" pattern is called **pre-norm*
 
 ## Chapter 13: The output. Logits, softmax and the loss
 
+> 🧒 **ELI5:** The model gives every possible next token a score. **Softmax** turns those scores into percentages that add up to 100%. The **loss** checks what percentage the model gave the correct answer: a lot means a small loss (good), almost none means a big loss (bad).
+
 ### 13.1 Logits
 
 After the final LayerNorm, each position has a 512-number vector. To score every possible next token, the model compares that vector against **every row of the token embedding table** (dot product). That gives 16,384 raw scores, called **logits**. A higher logit means "more likely next".
@@ -816,13 +872,17 @@ The loss for a whole batch is the **average** over all positions.
 
 > 💡 **Key idea:** The model outputs logits → softmax turns them into probabilities → cross-entropy grades how much probability went to the right answer. That single average number is "the loss".
 
-> ✅ **Check yourself 13.1:** Logits `[0, 0, 0]`: what are the probabilities? What's the loss if the answer is token #1?
+> **Q: Logits `[0, 0, 0]`: what are the probabilities? What's the loss if the answer is token #1?**
+>
+> A: All equal: `[1/3, 1/3, 1/3]`. Loss = `−log(1/3) = log 3 ≈ 1.10`.
 
 ---
 
 # PART 4: How It Learns
 
 ## Chapter 14: Backpropagation
+
+> 🧒 **ELI5:** Backprop is figuring out who's to blame. When the model's answer is wrong, you trace back through the calculation step by step and work out how much each knob helped cause the mistake. It's like a relay team losing a race: you check each runner's split time to see who slowed the team down, and by how much.
 
 This is the most important chapter. Take it slowly.
 
@@ -835,6 +895,8 @@ The slow way: nudge each knob one at a time and re-run the whole model. That's 3
 **Backpropagation ("backprop")** gets *all* 34 million gradients for the cost of about **one extra pass** (roughly 2× a forward pass). It's the algorithm that makes deep learning possible.
 
 ### 14.2 The chain rule
+
+> 🧒 **ELI5:** If a bike's gears make the back wheel turn 3 times for every pedal turn, and each wheel turn moves you 2 meters, then one pedal turn moves you 3 × 2 = 6 meters. Effects that are chained together **multiply**. Backprop is this one rule used over and over.
 
 If A affects B, and B affects C, then:
 ```
@@ -948,11 +1010,15 @@ In Part 5 you'll replace that one line with your own code.
 
 > 🧪 **Try it 14.1:** Same graph, but `x = 2`, `w1 = 1`, `w2 = 4`, `target = 5`. Do the forward pass, then compute `d_w1` and `d_w2` by hand. Check `d_w1` by nudging w1 to 1.001.
 
-> ✅ **Check yourself 14.1:** In `out = x + f(x)`, if `d_out = 5` and the blame coming back through `f` is `2`, what is `d_x`?
+> **Q: In `out = x + f(x)`, if `d_out = 5` and the blame coming back through `f` is `2`, what is `d_x`?**
+>
+> A: `d_x = 5 + 2 = 7`. Both paths add (Rule 1).
 
 ---
 
 ## Chapter 15: The backward rule for every layer
+
+> 🧒 **ELI5:** Each kind of layer gets its own little blame rule: "given how much my output was to blame, here's how much each of my inputs and knobs is to blame." Write one rule per layer type, then chain them together from the end of the model back to the start.
 
 Now we go through each layer in your model and write its backward rule. For each one you'll get: **what it does → its rule in words → the formula → shapes.**
 
@@ -1127,13 +1193,19 @@ loss
            └─► dE[ids] += dx;  dPos += dx                [15.8]
 ```
 
-> ✅ **Check yourself 15.1:** In a Linear layer, if `x` is shape `(2, 10, 16)` and `W` is `(32, 16)`, what are the shapes of `dy`, `dx` and `dW`?
+> **Q: In a Linear layer, if `x` is shape `(2, 10, 16)` and `W` is `(32, 16)`, what are the shapes of `dy`, `dx` and `dW`?**
 >
-> ✅ **Check yourself 15.2:** Why does the token embedding get gradient from two places?
+> A: `dy`: `(2, 10, 32)`. `dx`: `(2, 10, 16)`, same as x. `dW`: `(32, 16)`, same as W.
+>
+> **Q: Why does the token embedding get gradient from two places?**
+>
+> A: It's used twice: once as the input lookup table, and once as the output head that scores every token (tied embeddings). By Rule 1, both gradients add.
 
 ---
 
 ## Chapter 16: Gradient checking (how to know your backprop is right)
+
+> 🧒 **ELI5:** When you finish a long math problem, you check it a different way. Here you nudge one knob a tiny bit, see how much the loss actually changes, and compare that with what your backprop code predicted. If they match, your code is right.
 
 Backprop code can be *wrong* and still run. The loss might even go down, just slower. So you **must** check it. There are two ways.
 
@@ -1171,6 +1243,8 @@ It's slow (two forward passes per knob), so only spot-check a few knobs.
 ---
 
 ## Chapter 17: The training loop
+
+> 🧒 **ELI5:** Training is practice drills. Grab some text, let the model guess, grade it, work out the blame, nudge the knobs, repeat thousands of times. Every so often, give it a quiz on text it has never seen, to make sure it's really learning and not just memorizing.
 
 > 📁 **In the code:** `train.py`, lines 129–167. Let's walk through each piece.
 
@@ -1219,6 +1293,8 @@ torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
 ### 17.5 The optimizer: AdamW
 
+> 🧒 **ELI5:** AdamW is a smarter way to turn the knobs. It remembers which way each knob has been moving lately and keeps going that way (like a ball rolling downhill picks up speed), and it takes smaller, more careful steps on knobs whose blame keeps jumping around.
+
 Plain gradient descent (**SGD**, Stochastic Gradient Descent; *stochastic* means "using random samples") does `w = w − lr × grad`. Your project uses **AdamW**, which adds three upgrades:
 
 1. **Momentum** (the "first moment" `m`): a running average of recent gradients. Like a ball rolling downhill, it keeps moving in a consistent direction and smooths out jitter.
@@ -1242,6 +1318,8 @@ Interesting fact: on step 1, Adam moves every knob by about **±lr**, regardless
 **"Fused"** (`--optimizer-backend fused`) is a faster implementation that updates all knobs in one GPU operation. Same math.
 
 ### 17.6 The learning-rate schedule: warmup + cosine
+
+> 🧒 **ELI5:** Like a run: start slow to warm up, go fastest in the middle, then gradually slow down near the end so you finish carefully instead of stumbling.
 
 > 📁 `training_utils.py`, `learning_rate()`
 
@@ -1283,6 +1361,8 @@ The **GradScaler** is only needed for fp16. Tiny gradients can round to 0 in fp1
 
 ### 17.8 Validation and overfitting
 
+> 🧒 **ELI5:** It's the difference between memorizing the answer key and understanding the material. If the model keeps scoring better on practice questions but worse on brand-new ones, it's memorizing (**overfitting**).
+
 Every 50 steps (`--eval-every`), `train.py` computes the loss on **val** data, which the model never trained on:
 
 ```
@@ -1308,13 +1388,19 @@ It writes to a temporary file first and then renames it, so a crash mid-save can
 
 > 💡 **Key idea:** One training step = (accumulate gradients over several small batches) → clip → AdamW update with the scheduled learning rate. Do this thousands of times and check val loss along the way.
 
-> ✅ **Check yourself 17.1:** With `--batch 4 --accum 4 --context 512`, how many tokens are in one update step?
+> **Q: With `--batch 4 --accum 4 --context 512`, how many tokens are in one update step?**
 >
-> ✅ **Check yourself 17.2:** Why does training start with a small learning rate (warmup) instead of the peak right away?
+> A: `4 × 4 × 512 = 8,192` tokens.
+>
+> **Q: Why does training start with a small learning rate (warmup) instead of the peak right away?**
+>
+> A: At the start the knobs are random and AdamW has no gradient history, so early gradients are unreliable. Big steps could push the model into a bad, unstable region. Warming up lets things settle before taking big steps.
 
 ---
 
 ## Chapter 18: Generating text
+
+> 🧒 **ELI5:** To write, the model draws the next token like a raffle, where likely words hold more tickets. **Temperature** changes how fair the raffle is: low temperature almost always picks the favorite (safe but boring); high temperature gives the underdogs a better chance (more creative, more mistakes).
 
 > 📁 `generate.py`, lines 47–56
 
@@ -1351,6 +1437,8 @@ The model can only see 512 tokens. When the text gets longer, `generate.py` feed
 
 ## Chapter 19: From text predictor to chat
 
+> 🧒 **ELI5:** After pretraining, the model only knows how to continue text that looks like Wikipedia. To make it chat, you give it extra practice on example conversations so it learns the pattern "User asks, Assistant answers". It's the same guessing game with different practice material.
+
 > 📁 `dialogue.py`, `train_dialogue.py`
 
 After Wikipedia **pre-training**, the model knows language and facts, but it only knows how to *continue articles*. The **dialogue stage** (also called **fine-tuning**: more training, on different data) teaches the *shape* of a conversation:
@@ -1374,6 +1462,8 @@ Same model, same backprop, same optimizer. Only the data and the grading mask ch
 # PART 5: Lab. Write backprop yourself
 
 ## Chapter 20: Recoding backprop, step by step
+
+> 🧒 **ELI5:** Now you swap PyTorch's automatic blame calculator for your own. You build it one layer at a time, check each piece against PyTorch's answer, and finish when your version can train the whole model by itself.
 
 ### 20.1 The goal
 
@@ -1604,47 +1694,15 @@ Train a tiny model (width 64, 2 layers, context 64) on a slice of `val.bin` for 
 
 ---
 
-## Appendix C: Answers to "Check yourself"
-
-**1.1** Because many continuations are often reasonable, and because training needs a smooth score to improve. Grading "how much probability went to the right answer" gives partial credit, so the model can get *gradually* better. Probabilities also let generation sample varied text.
-
-**2.1** `(4, 7)`. The inner 3s cancel.
-
-**2.2** `dy/dx = 2x = 6`, positive. Nudging x up makes y go up, about 6× as much.
-
-**3.1** Down. A positive gradient means increasing the knob increases the loss, so move the opposite way.
-
-**4.1** Because the pre-splitting pattern keeps the space attached to the word, and BPE learned `" cat"` (mid-sentence) and `"cat"` (start of text or after a symbol) as separate pieces.
-
-**4.2** Every possible piece of text is made of bytes, and all 256 bytes are in the base vocabulary. Worst case, each byte becomes its own token.
-
-**5.1** Val measures how well the model handles text it hasn't seen. If it trained on val, a low val loss could just mean memorization, and you'd lose your honest check.
-
-**7.1** Token table: `16,384 × 512 = 8,388,608`. Position table: `512 × 512 = 262,144`.
-
-**11.1** Training asks every position to predict the *next* token. Without the mask, a position could look at the next token and copy it. That's cheating, and it learns nothing useful for real generation, where the future doesn't exist yet.
-
-**11.2** Equal: every score is 0 → all `exp(0)=1` → each visible token gets `1/n`. The output is the plain average of the visible Values.
-
-**13.1** All equal: `[1/3, 1/3, 1/3]`. Loss = `−log(1/3) = log 3 ≈ 1.10`.
-
-**Try it 14.1:** Forward: `h = 1·2 = 2`, `y = 4·2 = 8`, `L = (8−5)² = 9`. Backward: `d_y = 2(8−5) = 6`. `d_w2 = 6·h = 12`. `d_h = 6·w2 = 24`. `d_w1 = 24·x = 48`. Check: `w1 = 1.001` → `h = 2.002`, `y = 8.008`, `L = 3.008² = 9.048064` → `(9.048064 − 9)/0.001 ≈ 48`. ✔
-
-**14.1** `d_x = 5 + 2 = 7`. Both paths add (Rule 1).
-
-**15.1** `dy`: `(2, 10, 32)`. `dx`: `(2, 10, 16)`, same as x. `dW`: `(32, 16)`, same as W.
-
-**15.2** It's used twice: once as the input lookup table, and once as the output head that scores every token (tied embeddings). By Rule 1, both gradients add.
-
-**17.1** `4 × 4 × 512 = 8,192` tokens.
-
-**17.2** At the start the knobs are random and AdamW has no gradient history, so early gradients are unreliable. Big steps could push the model into a bad, unstable region. Warming up lets things settle before taking big steps.
+## Appendix C: Answers to "Try it"
 
 **Try it 2.1:** `y = [3, −1, 2]`.
 
 **Try it 3.1:** With LR 0.3: step 1 → `w = 3 − 0.3·(−16) = 7.8`, guess 15.6 (overshot!). Step 2 gradient = `2·5.6·2 = 22.4` → `w = 7.8 − 6.72 = 1.08`, guess 2.16, even further off on the other side. It bounces back and forth and **diverges**. That's the "LR too big" picture from 3.5.
 
 **Try it 4.1:** `"thats"` → `t h a t s` → (a+t) `t h at s` → (h+at) `t hat s` → (t+hat) **`that s`**. `"scat"` → `s c a t` → (a+t) `s c at` → (c+at) **`s cat`**.
+
+**Try it 14.1:** Forward: `h = 1·2 = 2`, `y = 4·2 = 8`, `L = (8−5)² = 9`. Backward: `d_y = 2(8−5) = 6`. `d_w2 = 6·h = 12`. `d_h = 6·w2 = 24`. `d_w1 = 24·x = 48`. Check: `w1 = 1.001` → `h = 2.002`, `y = 8.008`, `L = 3.008² = 9.048064` → `(9.048064 − 9)/0.001 ≈ 48`. ✔
 
 ---
 
