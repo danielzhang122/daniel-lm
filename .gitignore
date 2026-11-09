@@ -9,3 +9,7 @@ __pycache__/
 *.pt
 *.bin
 *.log
+exports/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

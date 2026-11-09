@@ -1,0 +1,7 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Library / daniellm</title><link rel="stylesheet" href="/style.css"></head><body><main>
+<header><h1>daniellm</h1><nav aria-label="Pages"><a href="/">Training</a><a href="/play">Try</a><a href="/samples">Samples</a><a href="/library" aria-current="page">Library</a><a href="/chat">Chat</a></nav></header>
+<h2>Offline reference library</h2><p>Search saved Wikipedia text. These are source passages, not AI answers. The library contains cleaned article bodies from the November 2023 snapshot; references and some short articles were removed.</p>
+<form id="searchForm" class="toolbar"><label for="query">Search <input id="query" maxlength="300" placeholder="electricity" required></label><button>Search</button></form><p id="libraryStatus" role="status"></p><div id="results"></div>
+<section id="articlePanel" hidden><div class="panelhead"><h2 id="articleTitle"></h2><button id="closeArticle">Close</button></div><a id="articleSource" target="_blank" rel="noopener">Original Wikipedia source (requires internet)</a><div id="articleBody" class="sample-text"></div></section>
+<p>Keep the source URLs and dataset metadata with this library. Wikipedia content remains subject to its source licenses; see the project README.</p>
+</main><script src="/library.js"></script></body></html>

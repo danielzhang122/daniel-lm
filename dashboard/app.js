@@ -16,6 +16,10 @@ function commands(){const r=selected();if(!r)return;const last=r.rows.filter(x=>
  const data=r.config.data||`data/${r.name}`,out=`runs/${r.name}`,base='.\\.venv\\Scripts\\python.exe';
  const settings=r.config.training;let extra=settings?` --batch ${settings.batch} --accum ${settings.accum} --schedule-steps ${settings.horizon} --warmup ${settings.warmup} --lr ${settings.lr} --min-lr ${settings.min_lr}`:'';
  $('trainCommand').textContent=`${base} train.py --data ${quote(data)} --out ${quote(out)} --resume --steps ${valid?target:(last.step||0)+1000} --eval-every 100${extra}`;
+ if(r.config.phase==='dialogue'){
+  const cfg=r.config.sft_settings||{batch:2,accum:4,horizon:1000};
+  $('trainCommand').textContent=`${base} train_dialogue.py --data ${quote(data)} --out ${quote(out)} --resume --steps ${valid?target:(last.step||0)+1000} --batch ${cfg.batch} --accum ${cfg.accum} --schedule-steps ${cfg.horizon}`;
+ }
  $('generateCommand').textContent=`${base} generate.py --checkpoint ${quote(out+'/latest.pt')} --tokenizer ${quote(data+'/tokenizer.json')} --prompt ${quote($('prompt').value)} --tokens 150`;
  $('copyGenerate').disabled=!r.checkpoint;
  const seconds=(target-(last.step||0))*tps/last.tokens_per_second;

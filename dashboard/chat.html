@@ -1,0 +1,5 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chat / daniellm</title><link rel="stylesheet" href="/style.css"></head><body><main>
+<header><h1>daniellm</h1><nav aria-label="Pages"><a href="/">Training</a><a href="/play">Try</a><a href="/chat" aria-current="page">Chat</a><a href="/samples">Samples</a><a href="/library">Library</a></nav></header>
+<h2>Experimental conversation</h2><p>Available after the separate dialogue-training stage. History stays in this tab and is trimmed to fit the model's context. Replies can be wrong; use Library to read actual source text.</p>
+<div class="toolbar"><label for="chatRun">Run <select id="chatRun"></select></label><button id="clearChat">New conversation</button></div><p id="chatStatus" role="status"></p><div id="messages"></div><form id="chatForm"><label for="message">Message</label><textarea id="message" maxlength="1000" rows="3" required></textarea><button id="sendChat" disabled>Send</button></form>
+</main><script src="/chat.js"></script></body></html>

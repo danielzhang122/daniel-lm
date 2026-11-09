@@ -7,6 +7,26 @@ import dashboard
 
 
 class DashboardTests(unittest.TestCase):
+    def test_generation_rejects_invalid_requests(self):
+        for payload in [[], {'run': '../full'}, {'run': 'full', 'prompt': ''},
+                        {'run': 'full', 'prompt': 'Hi', 'tokens': 5000},
+                        {'run': 'full', 'prompt': 'Hi', 'temperature': float('nan')}]:
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                dashboard.generation_command(payload)
+
+    def test_generation_uses_cpu_and_preserves_prompt_as_single_argument(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(dashboard, 'ROOT', Path(temp)):
+            folder = Path(temp) / 'runs' / 'full'
+            folder.mkdir(parents=True)
+            (folder / 'latest.pt').touch()
+            (folder / 'run.json').write_text(json.dumps({'data': 'E:/wiki-llm/data/full'}))
+            prompt = 'Text; $(not a command) <script>test</script>'
+            command = dashboard.generation_command({'run': 'full', 'prompt': prompt})
+            self.assertEqual(command[command.index('--device')+1], 'cpu')
+            self.assertEqual(command[command.index('--prompt')+1], prompt)
+            self.assertEqual(command[command.index('--tokenizer')+1].replace('\\', '/'),
+                             'E:/wiki-llm/data/full/tokenizer.json')
+
     def test_empty_workspace(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(dashboard, 'ROOT', Path(temp)):
             self.assertEqual(dashboard.snapshot()['runs'], [])

@@ -10,16 +10,17 @@ Own byte-level BPE tokenizer and randomly initialized GPT-style decoder. No pret
 
 ## Roadmap to conversation
 
-1. **Wikipedia pretraining — in progress.** Learn language patterns from the cleaned English Wikipedia snapshot. Full-data training continues the cleaned experiment's step-5,000 checkpoint. Track validation loss and periodically read generated samples; finishing a pass is not a guarantee of useful text.
-2. **Dialogue training — planned.** Continue training the pretrained model on appropriately licensed user/assistant conversations. Define consistent role boundaries and an end-of-turn marker, keep tokenizer/model compatibility explicit, and evaluate on conversations withheld from training. This stage teaches answering and turn-taking; it is not implemented yet.
-3. **Chat interface — planned.** Add interactive generation with recent conversation history, turn stopping, and context trimming. The current dashboard monitors training and copies commands; `generate.py` currently performs text completion, not chat.
-4. **Local hosting — planned.** Export inference-only weights with the matching tokenizer and code, then benchmark CPU generation on the old Dell Linux PC. Its specifications and achievable speed still need checking. Wikipedia data is not needed for inference.
-5. **Offline reference library — planned.** Keep searchable Wikipedia articles and selected practical manuals locally. Add retrieval that shows the passages and sources used for an answer, rather than relying only on the model's memory. The current packed training tokens are not a ready-to-use searchable library; this needs a separate preparation and indexing step.
-6. **Offline recovery — planned.** Back up weights, tokenizer, code, reference documents, and the installation packages needed for the target Linux PC on external storage. Test installation, startup, search, and conversation with networking disabled. Keep a way to read the reference material directly even if the model cannot answer.
+1. **Wikipedia pretraining ? running.** The full-data stage continues the cleaned experiment's weights. Track loss and read saved samples as it learns.
+2. **Dialogue stage ? pipeline tested, useful model pending.** A short-conversation starter set is prepared. Assistant-only training, checkpoint resume, shared role formatting and context trimming passed CPU smoke tests. Run the substantive stage after pretraining.
+3. **Interface ? implemented.** Training metrics, text completion, saved sample comparisons, and offline library search work locally. The chat page activates only for dialogue-stage checkpoints; no useful conversational checkpoint has been trained yet.
+4. **Offline references ? partial starter index ready.** Search 10,000 reconstructed cleaned articles and read their source text. The resumable indexer can process the rest. Generated, source-grounded answers and reliability evaluation remain future work.
+5. **Portable inference ? exported and locally tested.** An intermediate weights-only snapshot includes source code, tokenizer, reference library and checksums. Linux dependency packaging and testing on the actual Dell still need doing.
+
+See [OFFLINE.md](OFFLINE.md) for commands, verification results, limitations, and the next-stage workflow.
 
 Success means basic back-and-forth exchanges, relevant replies to simple prompts, correct turn boundaries, and some use of recent context. Evaluate those behaviors with a fixed set of prompts alongside held-out dialogue loss. There is no single loss threshold that proves conversational ability.
 
-For the reliability goal, also test factual questions against the saved sources, verify that cited passages support the answers, and check whether the assistant admits when information is missing. Record errors and limitations instead of treating fluent output as evidence of accuracy. It should help consult references, not serve as the sole authority for high-stakes decisions. Offline retrieval and these reliability evaluations are not implemented yet.
+For the reliability goal, also test factual questions against the saved sources, verify that cited passages support the answers, and check whether the assistant admits when information is missing. Record errors and limitations instead of treating fluent output as evidence of accuracy. It should help consult references, not serve as the sole authority for high-stakes decisions. Offline source search is implemented; generated source-grounded answers and systematic reliability evaluations are not yet implemented.
 
 Expect limited capability from 34M parameters: repetition, weak reasoning, and invented facts may remain. The current 512-token context must accommodate the prompt, recent history, and response; long conversations will need trimming. Wikipedia pretraining alone does not teach reliable conversation or factual accuracy. A larger model or longer context is a separate experiment, not part of the current training run.
 
@@ -32,7 +33,15 @@ cd C:\path\to\daniel-lm
 .\.venv\Scripts\python.exe dashboard.py
 ```
 
-Visit **http://127.0.0.1:8765**. daniellm refreshes your actual logs every three seconds, charts training/validation loss, explains the next steps, and builds copyable commands for the selected experiment. It is read-only: commands run when you paste them into a terminal. No extra packages or cloud hosting are required. Last log time indicates freshness, not proof that a process is running. Keep the dashboard terminal open; Ctrl+C stops it.
+Visit **http://127.0.0.1:8765**. daniellm refreshes your actual logs every three seconds, charts training/validation loss, explains the next steps, and builds copyable commands for the selected experiment. Training commands run only when you paste them into a terminal. The **Try the model** page generates real text directly in your browser using the latest saved checkpoint. No extra packages or cloud hosting are required. Last log time indicates freshness, not proof that a process is running. Keep the dashboard terminal open; Ctrl+C stops it.
+
+### Try the current model while training
+
+Visit **http://127.0.0.1:8765/play** or click **Try the model**. Choose a run, write the beginning of a paragraph, and click Generate. Results show the actual saved checkpoint step, token count, and generation time. Run names and prompts are sent only to the local server.
+
+Generation uses CPU with two PyTorch threads, leaving GPU memory for training. It still shares CPU, RAM, and disk resources. One request runs at a time, with a 200-token UI limit and a 120-second timeout. The model is loaded fresh for each request so newly saved checkpoints become available without restarting the dashboard. A fixed sampling seed makes same-setting comparisons easier. This is independent text completion, not conversation memory; repetition and invented facts are expected at this stage.
+
+If the dashboard was already running when this feature was installed, stop **only its terminal** with Ctrl+C and rerun `.\.venv\Scripts\python.exe dashboard.py`. Keep the training terminal running.
 
 The cleaned dataset scanned 100,000 articles and retained 86,968 after filtering, with 53,728,494 training tokens and 546,776 validation tokens. It has its own tokenizer and model; the pilot is preserved.
 
