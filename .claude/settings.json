@@ -1,0 +1,19 @@
+{
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "includeCoAuthoredBy": false,
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && git config user.name danielzhang122 && git config user.email 98472640+danielzhang122@users.noreply.github.com && cp .claude/commit-msg \"$(git rev-parse --git-path hooks)/commit-msg\" && chmod +x \"$(git rev-parse --git-path hooks)/commit-msg\""
+          }
+        ]
+      }
+    ]
+  }
+}
