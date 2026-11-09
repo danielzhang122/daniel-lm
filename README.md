@@ -35,6 +35,8 @@ cd C:\path\to\daniel-lm
 
 Visit **http://127.0.0.1:8765**. daniellm refreshes your actual logs every three seconds, charts training/validation loss, explains the next steps, and builds copyable commands for the selected experiment. Training commands run only when you paste them into a terminal. The **Try the model** page generates real text directly in your browser using the latest saved checkpoint. No extra packages or cloud hosting are required. Last log time indicates freshness, not proof that a process is running. Keep the dashboard terminal open; Ctrl+C stops it.
 
+Open **Model** in the dashboard for an interactive graph of sampled real feed-forward weights, plus the selected checkpoint's embeddings, transformer blocks, dimensions, and parameter counts. Enter text to inspect its real tokenizer output and click a token to explore the causal attention mask. The diagram shows the network structure and allowed visibility; it does not show actual attention weights or live activations. Inspection loads a trusted local checkpoint on CPU and does not train or modify it.
+
 ### Try the current model while training
 
 Visit **http://127.0.0.1:8765/play** or click **Try the model**. Choose a run, write the beginning of a paragraph, and click Generate. Results show the actual saved checkpoint step, token count, and generation time. Run names and prompts are sent only to the local server.

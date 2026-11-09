@@ -102,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.path != '/api/generate':
+        if self.path not in ('/api/generate', '/api/inspect'):
             self.send_json(404, {'error': 'Not found'})
             return
         allowed = {f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}'}
@@ -120,6 +120,22 @@ class Handler(BaseHTTPRequestHandler):
             command = generation_command(payload)
         except (ValueError, UnicodeDecodeError) as exc:
             self.send_json(400, {'error': str(exc)})
+            return
+        if self.path == '/api/inspect':
+            run = payload['run']
+            folder = ROOT / 'runs' / run
+            config = read_json(folder / 'run.json', {})
+            data = Path(config.get('data', ROOT / 'data' / run))
+            request = dict(checkpoint=str(folder / 'latest.pt'), tokenizer=str(data / 'tokenizer.json'), prompt=payload['prompt'])
+            try:
+                result = subprocess.run([sys.executable, str(ROOT / 'inspect_model.py')],
+                    input=json.dumps(request), capture_output=True, text=True, encoding='utf-8', timeout=60, cwd=ROOT)
+                if result.returncode:
+                    self.send_json(400, {'error': 'Could not inspect this checkpoint or tokenizer. Use a prompt up to 500 characters.'})
+                else:
+                    self.send_json(200, json.loads(result.stdout))
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                self.send_json(500, {'error': 'Could not inspect the checkpoint.'})
             return
         if not GENERATION_LOCK.acquire(blocking=False):
             self.send_json(409, {'error': 'A sample is already generating. Try again when it finishes.'})
@@ -162,8 +178,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/runs':
             body = json.dumps(snapshot(), allow_nan=False).encode()
             content_type = 'application/json'
-        elif path in ('/', '/index.html', '/app.js', '/style.css', '/play', '/play.html', '/play.js', '/library', '/library.html', '/library.js', '/samples', '/samples.html', '/samples.js','/chat','/chat.html','/chat.js'):
-            name = {'/':'index.html','/play':'play.html','/library':'library.html','/samples':'samples.html','/chat':'chat.html'}.get(path,path[1:])
+        elif path in ('/', '/index.html', '/app.js', '/style.css', '/play', '/play.html', '/play.js', '/library', '/library.html', '/library.js', '/samples', '/samples.html', '/samples.js','/chat','/chat.html','/chat.js','/model','/model.html','/model.js','/model.css','/neural.js'):
+            name = {'/':'index.html','/play':'play.html','/library':'library.html','/samples':'samples.html','/chat':'chat.html','/model':'model.html'}.get(path,path[1:])
             body = (ROOT / 'dashboard' / name).read_bytes()
             content_type = {'html': 'text/html', 'js': 'text/javascript', 'css': 'text/css'}[name.rsplit('.', 1)[1]]
         else:
