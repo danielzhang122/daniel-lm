@@ -13,7 +13,8 @@ def main():
     output = root / 'runs' / 'full'
     command = [sys.executable, str(root / 'train.py'), '--data', 'E:/wiki-llm/data/full',
                '--out', str(output), '--steps', str(args.steps), '--schedule-steps', '550550',
-               '--warmup', '200', '--lr', '0.0001', '--min-lr', '0.00001', '--eval-every', '500']
+               '--warmup', '200', '--lr', '0.0001', '--min-lr', '0.00001', '--eval-every', '500',
+               '--batch', '16', '--accum', '1', '--optimizer-backend', 'fused']
     if (output / 'latest.pt').exists():
         command += ['--resume']
     else:

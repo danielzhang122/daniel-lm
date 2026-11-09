@@ -9,7 +9,8 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 from model import GPT
-from training_utils import BlockSampler, learning_rate, validate_transfer
+from training_utils import (BlockSampler, learning_rate, validate_transfer,
+                            validate_resume_training, optimizer_state_with_backend)
 
 
 def main():
@@ -27,6 +28,8 @@ def main():
     p.add_argument('--warmup', type=int, default=200)
     p.add_argument('--lr', type=float, default=3e-4)
     p.add_argument('--min-lr', type=float, default=3e-5)
+    p.add_argument('--optimizer-backend', choices=['default', 'fused'], default=None,
+                   help='AdamW implementation; on resume, omit to preserve the checkpoint backend')
     args = p.parse_args()
     if args.resume and args.init_from:
         p.error('--resume and --init-from are mutually exclusive')
@@ -53,9 +56,11 @@ def main():
     if checkpoint.exists() and not args.resume:
         raise SystemExit('Checkpoint exists: use --resume or a new --out.')
     model = GPT(vocab_size=meta['vocab_size'], context=args.context).cuda()
-    opt = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.1)
+    opt = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.1,
+                            fused=True if args.optimizer_backend == 'fused' else None)
     start = 0
     transfer = None
+    validation_batch_size = args.batch
     if args.init_from:
         source = torch.load(args.init_from, map_location='cpu', weights_only=False)
         validate_transfer(source, model.config, meta)
@@ -67,13 +72,14 @@ def main():
         ck = torch.load(checkpoint, map_location='cpu', weights_only=False)  # own local checkpoint only
         if ck['config'] != model.config or ck['data'] != meta:
             raise SystemExit('Checkpoint model/data mismatch.')
-        if 'training' in ck and ck['training'] != training:
-            raise SystemExit('Resume requires the original batch, accumulation and schedule settings.')
+        if 'training' in ck:
+            validate_resume_training(ck['training'], training)
         if 'training' not in ck:
             training = None  # Preserve original pilot sampling and constant learning rate.
         model.load_state_dict(ck['model'])
-        opt.load_state_dict(ck['optimizer'])
+        opt.load_state_dict(optimizer_state_with_backend(ck['optimizer'], args.optimizer_backend))
         start = ck['step']
+        validation_batch_size = ck.get('validation_batch_size', ck.get('training', {}).get('batch', args.batch))
         transfer = ck.get('transfer')
         rng.bit_generator.state = ck['rng']
         torch.set_rng_state(ck['torch_rng'])
@@ -85,14 +91,17 @@ def main():
     sampler = BlockSampler(len(arrays['train']), args.context, start * args.batch * args.accum)
     (args.out / 'run.json').write_text(json.dumps(dict(data=str(args.data.resolve()),
         target_steps=args.steps, tokens_per_step=args.batch*args.accum*args.context,
-        training=training, transfer=transfer, parameters=sum(p.numel() for p in model.parameters())), indent=2), encoding='utf-8')
+        training=training, transfer=transfer, validation_batch_size=validation_batch_size,
+        optimizer_backend='fused' if opt.param_groups[0].get('fused') else 'default',
+        parameters=sum(p.numel() for p in model.parameters())), indent=2), encoding='utf-8')
 
     def batch(split, generator):
         a = arrays[split]
         if split == 'train' and training:
             packed = a[sampler.next_indices(args.batch)].astype(np.int64)
         else:
-            ix = generator.integers(0, len(a) - args.context, size=args.batch)
+            size = validation_batch_size if split == 'val' else args.batch
+            ix = generator.integers(0, len(a) - args.context, size=size)
             packed = np.stack([a[i:i + args.context + 1].astype(np.int64) for i in ix])
         data = torch.from_numpy(packed).cuda()
         return data[:, :-1], data[:, 1:]
@@ -115,20 +124,20 @@ def main():
                     group['lr'] = lr
             model.train()
             opt.zero_grad(set_to_none=True)
-            total = 0.0
+            total = torch.zeros((), device='cuda')
             for _ in range(args.accum):
                 value = loss('train', rng)
-                if not torch.isfinite(value):
-                    raise RuntimeError('Nonfinite loss')
-                total += value.detach().item() / args.accum
+                total += value.detach() / args.accum
                 scaler.scale(value / args.accum).backward()
+            if not torch.isfinite(total):
+                raise RuntimeError('Nonfinite loss')
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(opt)
             scaler.update()
             if step % 10 == 0 or step == args.steps:
                 torch.cuda.synchronize()
-                row = dict(step=step, train_loss=total, lr=opt.param_groups[0]['lr'],
+                row = dict(step=step, train_loss=total.item(), lr=opt.param_groups[0]['lr'],
                            tokens_seen=step*tokens_per_step,
                            tokens_per_second=(step-start)*tokens_per_step/(time.perf_counter()-begin),
                            peak_vram_gb=torch.cuda.max_memory_allocated()/1024**3)
@@ -146,7 +155,8 @@ def main():
                 temp = checkpoint.with_suffix('.tmp')
                 state = dict(model=model.state_dict(), optimizer=opt.state_dict(), config=model.config,
                                 data=meta, step=step, rng=rng.bit_generator.state, torch_rng=torch.get_rng_state(),
-                                cuda_rng=torch.cuda.get_rng_state(), scaler=scaler.state_dict(), transfer=transfer)
+                                cuda_rng=torch.cuda.get_rng_state(), scaler=scaler.state_dict(), transfer=transfer,
+                                validation_batch_size=validation_batch_size)
                 if training:
                     state['training'] = training
                 torch.save(state, temp)

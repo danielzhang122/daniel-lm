@@ -7,6 +7,19 @@ import dashboard
 
 
 class DashboardTests(unittest.TestCase):
+    def test_compact_metrics_preserves_first_latest_and_last_duplicate(self):
+        rows = [dict(step=i, train_loss=float(i), tokens_per_second=i) for i in range(100)]
+        rows += [dict(step=i, val_loss=float(i)) for i in range(0,100,10)]
+        rows += [dict(step=99, train_loss=123.0, tokens_per_second=456)]
+        compact = dashboard.compact_metrics(rows, train_limit=7, validation_limit=4)
+        train = [r for r in compact if 'train_loss' in r]
+        validation = [r for r in compact if 'val_loss' in r]
+        self.assertEqual(len(train),7)
+        self.assertEqual(len(validation),4)
+        self.assertEqual([train[0]['step'],train[-1]['step']],[0,99])
+        self.assertEqual(train[-1]['tokens_per_second'],456)
+        self.assertEqual([validation[0]['step'],validation[-1]['step']],[0,90])
+
     def test_generation_rejects_invalid_requests(self):
         for payload in [[], {'run': '../full'}, {'run': 'full', 'prompt': ''},
                         {'run': 'full', 'prompt': 'Hi', 'tokens': 5000},

@@ -91,6 +91,18 @@ def snapshot():
     return dict(runs=runs, project=str(ROOT))
 
 
+def compact_metrics(rows, train_limit=1000, validation_limit=500):
+    """Keep representative chart points and the latest metrics without changing the log."""
+    def compact(key, limit):
+        by_step = {r['step']: r for r in rows if key in r and isinstance(r.get('step'), int)}
+        values = [by_step[step] for step in sorted(by_step)]
+        if len(values) <= limit:
+            return values
+        return [values[i * (len(values) - 1) // (limit - 1)] for i in range(limit)]
+    return sorted(compact('train_loss', train_limit) + compact('val_loss', validation_limit),
+                  key=lambda r: (r['step'], 'val_loss' in r))
+
+
 class Handler(BaseHTTPRequestHandler):
     def send_json(self, status, data):
         body = json.dumps(data).encode()
@@ -176,7 +188,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200 if item else 404,item or {'error':'Article not found'})
             return
         if path == '/api/runs':
-            body = json.dumps(snapshot(), allow_nan=False).encode()
+            data = snapshot()
+            if query.get('compact') == ['1']:
+                for run in data['runs']:
+                    run['rows'] = compact_metrics(run['rows'])
+            body = json.dumps(data, allow_nan=False).encode()
             content_type = 'application/json'
         elif path in ('/', '/index.html', '/app.js', '/style.css', '/play', '/play.html', '/play.js', '/library', '/library.html', '/library.js', '/samples', '/samples.html', '/samples.js','/chat','/chat.html','/chat.js','/model','/model.html','/model.js','/model.css','/neural.js'):
             name = {'/':'index.html','/play':'play.html','/library':'library.html','/samples':'samples.html','/chat':'chat.html','/model':'model.html'}.get(path,path[1:])

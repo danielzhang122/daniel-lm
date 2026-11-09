@@ -102,7 +102,7 @@ The script stores checkpoints in this project's `runs/full` so the local dashboa
 The equivalent continuation command is:
 
 ```powershell
-.\.venv\Scripts\python.exe train.py --data E:\wiki-llm\data\full --out runs/full --resume --steps 550550 --schedule-steps 550550 --lr 0.0001 --min-lr 0.00001 --eval-every 500
+.\.venv\Scripts\python.exe train.py --data E:\wiki-llm\data\full --out runs/full --resume --steps 550550 --schedule-steps 550550 --lr 0.0001 --min-lr 0.00001 --eval-every 500 --batch 16 --accum 1 --optimizer-backend fused
 ```
 
 For a **new output directory**, replace `--resume` with `--init-from runs/clean-100k/latest.pt`. Transfer loads weights only; ordinary resume restores the optimizer and data position. They cannot be combined. Token counts and tokenizer hashes are checked before training. One pass covers the shuffled training blocks (the final partial block wraps to the beginning); validation articles are never trained on. This is a coverage target, not a guarantee of model quality.
@@ -122,7 +122,7 @@ The cleaned experiment scans 100,000 articles and drops articles with fewer than
 .\.venv\Scripts\python.exe train.py --data data/full --out runs/full --steps 10000
 ```
 
-`--steps` is the total target, including resumed steps. `--resume` requires the same data metadata and model configuration; new checkpoints also require matching batch, accumulation and schedule settings. Only load your own trusted checkpoint files. Checkpoints include optimizer and random-generator states and replace `latest.pt` atomically. Interruptions lose steps since the latest checkpoint (every 50 steps by default, 100 in these commands).
+`--steps` is the total target, including resumed steps. `--resume` requires the same data metadata and model configuration; new checkpoints require the same sampler and schedule. Batch size and accumulation may change only if their product stays the same, preserving tokens per optimizer step and block order. Validation retains its original sample size across such changes. Only load your own trusted checkpoint files. Checkpoints include optimizer and random-generator states and replace `latest.pt` atomically. Interruptions lose steps since the latest checkpoint (every 50 steps by default, 100 in these commands).
 
 Full-data commands above start a new model. The pilot is deliberately disposable. For a better vocabulary, train a fresh tokenizer on a larger sample before starting a serious run. The data preparer refuses nonempty output folders; interrupted preparation must use a fresh output directory.
 
@@ -132,10 +132,14 @@ New runs warm up for 200 steps to 0.0003, then follow cosine decay to 0.00003 at
 
 Cleanup stops at an exact standalone References, Bibliography, External links, See also, or similar heading, removes explicit category lines, and collapses excess blank lines. This is a heuristic: useful later sections can be lost, and unlabeled category text may remain. It is applied identically to tokenizer training, model training, and validation; source URLs and cleaning settings are retained. Loss values from different tokenizers/datasets should not be directly compared.
 
-Use the run's `metrics.jsonl` to estimate time: `target tokens / measured tokens per second`. The default optimizer step processes 8,192 tokens. The logged average includes validation/checkpoint overhead after the first evaluation. Reduce `--batch` to 1 before starting a fresh run if VRAM is tight.
+Use the run's `metrics.jsonl` to estimate time: `target tokens / measured tokens per second`. The default optimizer step processes 8,192 tokens. The logged average includes validation/checkpoint overhead after the first evaluation. The full-data runner uses batch 16 with accumulation 1, tested on a 12 GB 4070 Ti. If VRAM is tight, the equivalent `--batch 8 --accum 2` can resume the same block-sampled checkpoint. The validation batch remains fixed. Floating-point results can differ slightly when operations are regrouped.
 
 C: had about 39 GiB free at setup; E: had about 690 GiB. Before full preparation, choose an appropriate local data location with `--out`, and point training at it with `--data`. Avoid syncing `.venv`, `data`, `.cache`, and `runs` through OneDrive: `.gitignore` only affects Git. Network/model downloads are cached under this project's `.cache`.
 
 Dataset source and licensing information: https://huggingface.co/datasets/wikimedia/wikipedia . Keep `sources.jsonl` and the dataset metadata with derived datasets; consult the source's attribution/share-alike terms before redistribution.
 
 References: https://huggingface.co/docs/datasets/stream , https://huggingface.co/docs/tokenizers/quicktour , https://pytorch.org/get-started/locally/ .
+
+## Training performance
+
+`bench_training.py` benchmarks actual model dimensions and dataset reads without changing checkpoints. The full-data runner uses 16 sequences per microbatch and one accumulation step; it still processes 8,192 tokens per optimizer update. A short test while another training process shared the GPU measured about 55,800 tokens/second for batch 16 versus 40,500 for batch 2, so the comparison is indicative rather than an idle-GPU benchmark. The optimizer moments and step counts, schedule, data position, and fixed validation sample are preserved on resume. The full-data runner also uses fused AdamW. To switch back, run `train.py` with the same full-data options and `--optimizer-backend default`; omit that option to preserve whichever backend is saved in the checkpoint. Fused and default implementations may differ slightly due to floating-point arithmetic. Peak GPU memory in the separate batch-16 test was about 3.1 GiB allocated by that test process.
