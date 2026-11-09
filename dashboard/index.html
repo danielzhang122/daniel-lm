@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b0b0b"><title>daniellm</title><link rel="stylesheet" href="/style.css"></head>
+<body><main>
+<header><h1>daniellm</h1><span id="connection" role="status">Connecting...</span></header>
+<div class="toolbar"><label for="run">Run <select id="run"></select></label><span id="activity"></span></div>
+<section class="stats" aria-label="Training statistics">
+<div><span>Step</span><strong id="step">&mdash;</strong><small id="target"></small></div>
+<div><span>Validation loss</span><strong id="loss">&mdash;</strong><small>Lower is better</small></div>
+<div><span>Tokens / sec</span><strong id="speed">&mdash;</strong></div>
+<div><span>Articles</span><strong id="articles">&mdash;</strong><small id="dataNote"></small></div>
+</section>
+<section class="learning"><div class="panelhead"><h2>Loss</h2><div class="legend"><span>Training</span><span>Validation</span></div></div><svg id="chart" viewBox="0 0 760 280" role="img" aria-label="Training and validation loss by step"></svg>
+<details><summary>How to read this</summary><p id="insight">Waiting for validation results.</p><p>Lower loss means better next-token prediction, not factual accuracy. If training loss falls while validation loss repeatedly rises, review possible overfitting. Compare trends within the same run.</p></details></section>
+<section class="actions"><h2>Next steps</h2><p class="hint">Copy a command into PowerShell. Finish any active training run first.</p>
+<div class="actiongrid"><div><label for="goal">Train to step</label><input id="goal" type="number" min="1" step="100" value="5000"><p id="estimate"></p><button id="copyTrain">Copy training command</button><details><summary>Show command</summary><pre id="trainCommand"></pre></details></div>
+<div><label for="prompt">Try a prompt</label><input id="prompt" value="The Solar System" maxlength="300"><p>Generate a sample after training.</p><button id="copyGenerate">Copy generation command</button><details><summary>Show command</summary><pre id="generateCommand"></pre></details></div></div>
+<p id="notice" role="status"></p><details><summary>Setup &amp; help</summary><p>Run the commands from this project folder:</p><pre id="cdCommand"></pre><p>Check validation loss and generated text before adding more steps. More training on a small sample can eventually overfit. Prepare a larger dataset when you need broader coverage.</p><p>Keep <code>.\.venv\Scripts\python.exe dashboard.py</code> running in another terminal. This page refreshes every three seconds.</p></details></section>
+</main><script src="/app.js"></script></body></html>

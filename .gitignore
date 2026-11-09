@@ -1,0 +1,11 @@
+.venv/
+data/
+runs/
+.cache/
+__pycache__/
+.env
+.env.*
+!.env.example
+*.pt
+*.bin
+*.log
