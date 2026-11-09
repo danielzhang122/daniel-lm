@@ -174,15 +174,66 @@ So W turned a size-2 vector into a size-3 vector. In PyTorch this is written `y 
 
 ### 2.3 Tensors and shapes
 
-A **tensor** is the general word for a grid of numbers with any number of dimensions:
+> 🧒 **ELI5:** A tensor is just numbers stored in a box with some number of sides: a single number, a list, a table, or a stack of tables. The **shape** is a short list saying how long each side is. A shape of `(3, 4)` means a table with 3 rows and 4 columns, so 12 numbers. Multiply the shape's numbers together and you get how many numbers are inside.
 
-| Dimensions | Name | Example shape | Example |
+**First, forget "direction."** In physics, a scalar is a size with no direction (like temperature) and a vector has a direction (like velocity). Machine learning borrows the same words but uses them more simply. Here, they only describe **how the numbers are arranged**:
+
+- A **scalar** is one number by itself.
+- A **vector** is a list of numbers.
+- A **matrix** is a table of numbers (rows and columns).
+- A **tensor** is the general word for any of these, including stacks of tables with even more layers.
+
+A token's 512-number vector isn't an arrow pointing somewhere. It's just 512 numbers in a row, each one describing something about the token.
+
+#### What the shape tells you
+
+The best way to understand a shape: **how many position numbers do you need to point at one single value?**
+
+| Name | Dimensions | To find one number you need... | Example | Shape |
+|---|---|---|---|---|
+| scalar | 0 | nothing, there's only one number | `7` | `()` |
+| vector | 1 | 1 position: which item in the list | `[4, 9, 2]` | `(3,)` |
+| matrix | 2 | 2 positions: which row, which column | 2 rows of 3 numbers | `(2, 3)` |
+| 3-D tensor | 3 | 3 positions: which table, which row, which column | 4 tables, each 2 × 3 | `(4, 2, 3)` |
+
+So:
+- **The number of entries in the shape** is the number of dimensions. `(4, 2, 3)` has 3 entries, so it's 3-D.
+- **Each entry** is how many options there are for that position. `(4, 2, 3)` means 4 tables, each with 2 rows, each row with 3 numbers.
+- **Multiply the entries** to get the total count of numbers: `4 × 2 × 3 = 24`.
+
+A scalar's shape is empty, `()`, because you don't need any position to find its one number.
+
+#### Building up, one dimension at a time
+
+Each new dimension means "many of the previous thing":
+
+```
+scalar        7                                   shape ()          1 number
+
+vector        [4, 9, 2]                           shape (3,)        3 numbers
+
+matrix        [[4, 9, 2],                         shape (2, 3)      6 numbers
+               [1, 0, 5]]                         2 rows, 3 columns
+
+3-D tensor    [ [[4, 9, 2], [1, 0, 5]],           shape (4, 2, 3)   24 numbers
+                [[...],     [...]   ],            4 matrices,
+                [[...],     [...]   ],            each 2 × 3
+                [[...],     [...]   ] ]
+```
+
+To read one value, you give one position per dimension, counting from 0. In the matrix above, `[1, 2]` means row 1, column 2, which is `5`.
+
+#### The shapes in this project
+
+| Dimensions | Example shape | What it holds | How to read the shape |
 |---|---|---|---|
-| 0 | scalar | `()` | the loss: `3.21` |
-| 1 | vector | `(512,)` | one token's profile |
-| 2 | matrix | `(16384, 512)` | the whole token table |
-| 3 | 3-D tensor | `(2, 512, 512)` | a batch of sentences |
-| 4 | 4-D tensor | `(2, 8, 512, 512)` | attention scores |
+| 0 | `()` | the loss, like `3.21` | one number |
+| 1 | `(512,)` | one token's vector | 512 numbers |
+| 2 | `(16384, 512)` | the whole token table | 16,384 tokens, 512 numbers each |
+| 3 | `(2, 512, 512)` | a batch of text going through the model | 2 chunks of text, 512 tokens each, 512 numbers per token |
+| 4 | `(2, 8, 512, 512)` | attention scores | 2 chunks, 8 heads, and for each of 512 tokens, a score for each of 512 tokens |
+
+Check the token table: `16,384 × 512 = 8,388,608` numbers. That's one shape, and you already know how big it is.
 
 **Shape letters used in this guide (and in `model.py`):**
 
@@ -195,7 +246,9 @@ A **tensor** is the general word for a grid of numbers with any number of dimens
 | `d` | per-head width = `c / h` | 64 |
 | `V` | **vocabulary** size: how many different tokens exist | 16,384 |
 
-So the main data flowing through the model has shape **`(b, t, c)`**: "for each chunk, for each position, 512 numbers". When you're confused, **write the shapes down.** Half of deep learning debugging is shape bookkeeping.
+So the main data flowing through the model has shape **`(b, t, c)`**. Read it left to right: "for each chunk of text, for each token in it, 512 numbers." Pointing at one value takes three positions, like `[1, 40, 7]`: chunk 1, token 40, number 7 of that token's vector.
+
+When you're confused, **write the shapes down.** Half of deep learning debugging is checking that shapes line up.
 
 ### 2.4 `exp` and `log`
 
