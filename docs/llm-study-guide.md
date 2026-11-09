@@ -70,6 +70,42 @@ The rest of this guide explains each box.
 
 ---
 
+## This project in a nutshell (read before Chapter 1)
+
+> 🧒 **ELI5:** This model learned by reading English Wikipedia and practicing guessing the next piece of text. Below are the main numbers you'll see throughout the guide and where each one comes from. You don't need to understand them yet. Just come back here when a number shows up and you wonder "why that?"
+
+**A few words you'll see right away:**
+- **Token:** a small piece of text, like a word or part of a word. The model reads and writes tokens, not letters.
+- **Vocabulary:** the full list of tokens the model knows.
+- **Parameter (also "weight" or "knob"):** one adjustable number inside the model. Training means changing these.
+- **Training:** showing the model text over and over and adjusting its parameters so its guesses get better.
+- **Step:** one round of "guess, check, adjust."
+
+**The dataset:**
+- English Wikipedia, the November 1, 2023 snapshot (`wikimedia/wikipedia`, config `20231101.en` on Hugging Face).
+- Reference lists, "See also" and similar sections are cut off (`cleaning.py`).
+- About 1 in 100 articles is kept aside and never trained on. It's used to test the model on text it hasn't seen (`prepare.py`).
+- After tokenizing, the full dataset is about **4.5 billion tokens**.
+
+**The numbers, and where they come from:**
+
+| Number | What it is | Where it comes from |
+|---|---|---|
+| **16,384** | vocabulary size: how many different tokens exist | Chosen in `prepare.py` when the tokenizer is trained. It's 2¹⁴, a round number in binary. Bigger means fewer tokens per sentence but a bigger model. It also has to stay under 65,536, because each token ID is saved to disk as a 2-byte number (`uint16`). |
+| **512** (context) | how many tokens the model can look at at once | `--context` in `train.py`, and the size of the position table in `model.py`. Anything older than 512 tokens is forgotten. |
+| **512** (width) | how many numbers describe each token inside the model | `width` in `model.py`. A different 512 from the context, it's just a coincidence they match. |
+| **8** layers | how many blocks the data passes through | `layers` in `model.py`. |
+| **8** heads | how many separate attention units each block has | `heads` in `model.py`. 512 ÷ 8 = **64** numbers per head. |
+| **~34 million** | total parameters | Comes from the settings above. About 8.4M are in the token table (16,384 × 512); most of the rest are in the 8 blocks, about 3.2M each. |
+| **8,192** | tokens per training step on the full run | `train_full.py` uses `--batch 16 --accum 1`, and 16 × 512 = 8,192. |
+| **550,550** | steps in the full run | 4.5 billion tokens ÷ 8,192 tokens per step ≈ 550,000, so the model reads the whole dataset about once. |
+
+**The hardware:** one RTX 4070 Ti graphics card (12 GB of memory). The model size was picked so it trains on that card in a reasonable time.
+
+**Code you'll see referenced:** `prepare.py` builds the data and tokenizer, `model.py` is the model, `train.py` is the training loop, and `generate.py` writes text. [Appendix B](#appendix-b-map-of-the-repository) maps every file.
+
+---
+
 # PART 1: The Big Idea
 
 ## Chapter 1: What is a language model?

@@ -6,7 +6,7 @@ in case the world actually ends, i'd like a handy everything guide on hand, and 
 
 **the goal:** an offline companion that can hold simple conversations and help find information in a saved reference library. It's trained on my own hardware and runs locally, with no subscription or internet needed. the tokenizer isn't my code: it's huggingface's `tokenizers` library, trained on my wikipedia data to learn its vocabulary. huggingface's `datasets` downloads the data, and pytorch's autograd does the backprop. (to be changed, see below)
 
-I plan on eventually rewriting the backprop myself, or at least try to. i was told it would be a good exercise. to help teach me, i had claude generate me [this study guide](docs/llm-study-guide.md) in order to get me up to speed on how language models work at a lower level. hopefully this will be enough for me to understand well enough how language models work and ease my paranoia a bit.
+I plan on eventually rewriting the backprop myself, or at least try to. i was told it would be a good exercise. to help teach me, i had claude generate me [this study guide](docs/llm-study-guide.md) in order to get me up to speed on how language models work at a lower level. yes, i'm using an llm to learn about llms so i can make an llm. hopefully this will be enough for me to understand well enough how language models work and ease my paranoia a bit.
 
 **the model:** a byte-level BPE tokenizer (huggingface's `tokenizers` library, with a vocabulary trained on this data) and a GPT-style decoder trained from random weights (no pretrained weights). About 34M parameters: 8 layers, width 512, 8 attention heads, 512-token context, 16,384-token vocabulary, tied input/output embeddings. Built for an RTX 4070 Ti (12 GB).
 
