@@ -89,6 +89,8 @@ The rest of this guide explains each box.
 
 **The numbers, and where they come from:**
 
+Don't worry if these don't make sense yet. Each one is explained properly in its own chapter as you read through the guide; this table is just a quick reference.
+
 | Number | What it is | Where it comes from |
 |---|---|---|
 | **16,384** | vocabulary size: how many different tokens exist | Chosen in `prepare.py` when the tokenizer is trained. It's 2¹⁴, a round number in binary. Bigger means fewer tokens per sentence but a bigger model. It also has to stay under 65,536, because each token ID is saved to disk as a 2-byte number (`uint16`). |
