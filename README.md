@@ -1,6 +1,27 @@
 # daniellm
 
+i went down an AI rabbit hole and now i'm a little scared they're gonna take over the world. so i'm building this guy from scratch. hopefully my in with the machines if things get weird.
+
+also, if the world ends, i'd like a little post-apocalyptic everything guide on hand. preferably one that doesn't ask me to renew my subscription while i'm living in a shed.
+
+**The actual goal:** a somewhat reliable offline companion that can hold simple conversations and help me find and understand information in a saved reference library. Trained on my own hardware, hosted locally, with no API subscription or internet needed for everyday use. That's the goal, not what the current model can do yet. It will still need a working computer and power.
+
 Own byte-level BPE tokenizer and randomly initialized GPT-style decoder. No pretrained model weights. Defaults: about 34M parameters, 8 layers, width 512, 8 attention heads, 512-token context, tied input/output embeddings, and a 16,384-token vocabulary. Intended for an RTX 4070 Ti 12 GB.
+
+## Roadmap to conversation
+
+1. **Wikipedia pretraining — in progress.** Learn language patterns from the cleaned English Wikipedia snapshot. Full-data training continues the cleaned experiment's step-5,000 checkpoint. Track validation loss and periodically read generated samples; finishing a pass is not a guarantee of useful text.
+2. **Dialogue training — planned.** Continue training the pretrained model on appropriately licensed user/assistant conversations. Define consistent role boundaries and an end-of-turn marker, keep tokenizer/model compatibility explicit, and evaluate on conversations withheld from training. This stage teaches answering and turn-taking; it is not implemented yet.
+3. **Chat interface — planned.** Add interactive generation with recent conversation history, turn stopping, and context trimming. The current dashboard monitors training and copies commands; `generate.py` currently performs text completion, not chat.
+4. **Local hosting — planned.** Export inference-only weights with the matching tokenizer and code, then benchmark CPU generation on the old Dell Linux PC. Its specifications and achievable speed still need checking. Wikipedia data is not needed for inference.
+5. **Offline reference library — planned.** Keep searchable Wikipedia articles and selected practical manuals locally. Add retrieval that shows the passages and sources used for an answer, rather than relying only on the model's memory. The current packed training tokens are not a ready-to-use searchable library; this needs a separate preparation and indexing step.
+6. **Offline recovery — planned.** Back up weights, tokenizer, code, reference documents, and the installation packages needed for the target Linux PC on external storage. Test installation, startup, search, and conversation with networking disabled. Keep a way to read the reference material directly even if the model cannot answer.
+
+Success means basic back-and-forth exchanges, relevant replies to simple prompts, correct turn boundaries, and some use of recent context. Evaluate those behaviors with a fixed set of prompts alongside held-out dialogue loss. There is no single loss threshold that proves conversational ability.
+
+For the reliability goal, also test factual questions against the saved sources, verify that cited passages support the answers, and check whether the assistant admits when information is missing. Record errors and limitations instead of treating fluent output as evidence of accuracy. It should help consult references, not serve as the sole authority for high-stakes decisions. Offline retrieval and these reliability evaluations are not implemented yet.
+
+Expect limited capability from 34M parameters: repetition, weak reasoning, and invented facts may remain. The current 512-token context must accommodate the prompt, recent history, and response; long conversations will need trimming. Wikipedia pretraining alone does not teach reliable conversation or factual accuracy. A larger model or longer context is a separate experiment, not part of the current training run.
 
 ## Local training dashboard
 
