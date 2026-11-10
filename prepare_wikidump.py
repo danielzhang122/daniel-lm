@@ -22,12 +22,80 @@ DROP_TAGS = {'ref', 'gallery', 'math', 'chem', 'score', 'timeline', 'graph', 'ma
 DROP_LINKS = ('file:', 'image:', 'category:', 'media:')
 
 
+RANGE_WORDS = {'-', '–', 'to', 'and', 'or', 'by', 'x', '×', 'to(-)', '+/-', '±'}
+UNIT_NAMES = {'C': '°C', 'F': '°F', 'K': 'K', 'storey': 'storey', 'story': 'story'}
+MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+          'September', 'October', 'November', 'December']
+KEEP_FIRST = {'nowrap', 'nobr', 'small', 'big', 'abbr', 'not a typo', 'sic', 'visible anchor', 'em',
+              'strong', 'smallcaps', 'sc', 'math', 'mvar', 'var', 'nobold', 'noitalic', 'proper name'}
+KEEP_LAST = {'lang', 'langx', 'transl', 'transliteration', 'script'}
+SYMBOLS = {'nbsp': ' ', 'snd': ' – ', 'spaced ndash': ' – ', 'ndash': '–', 'mdash': '—', 'spaced en dash': ' – ',
+           '\'': "'", '\'"': '\'"', 'thinsp': ' ', '=': '=', '!': '|', 'pi': 'π', 'deg': '°', 'degree': '°'}
+DATE_TEMPLATES = {'start date', 'end date', 'birth date', 'death date', 'start date and age', 'birth date and age',
+                  'death date and age', 'dts', 'date', 'film date', 'released'}
+
+
+def _template_text(template):
+    """Readable text for the templates that carry article content (values, units, dates, foreign words), else None."""
+    name = str(template.name).strip().replace('_', ' ')
+    low = name.lower()
+    pos = [p.value.strip_code().strip() for p in template.params if not p.showkey]
+    named = {str(p.name).strip(): p.value.strip_code().strip() for p in template.params if p.showkey}
+    if low in SYMBOLS:
+        return SYMBOLS[low]
+    if low in ('convert', 'cvt') and pos:
+        if named.get('disp') in ('out', 'output only', 'output number only'):
+            return None  # shows only the converted value, which usually repeats the one written just before
+        if len(pos) >= 4 and pos[1] in RANGE_WORDS:
+            unit = UNIT_NAMES.get(pos[3], pos[3])
+            return f'{pos[0]} {pos[1]} {pos[2]} {unit}'.replace(' - ', '–')
+        unit = UNIT_NAMES.get(pos[1], pos[1]) if len(pos) > 1 else ''
+        return f'{pos[0]} {unit}'.strip()
+    if low == 'val' and pos:
+        return f"{pos[0]} {named.get('u', named.get('ul', ''))}".strip()
+    if low.startswith('lang-') and pos:
+        return pos[0]
+    if low in KEEP_LAST and len(pos) >= 2:
+        return pos[1]
+    if low in KEEP_FIRST and pos:
+        return pos[0]
+    if low in ('frac', 'fraction', 'sfrac') and pos:
+        return pos[0] if len(pos) == 1 else (f'{pos[0]} {pos[1]}/{pos[2]}' if len(pos) >= 3 else f'{pos[0]}/{pos[1]}')
+    if low in ('circa', 'c.') and pos:
+        return 'c. ' + pos[0]
+    if low == 'as of' and pos:
+        return ('as of ' if named.get('lc') else 'As of ') + pos[0]
+    if low in ('us$', 'usd') and pos:
+        return 'US$' + pos[0]
+    if low in DATE_TEMPLATES:
+        nums = [p for p in pos if p.isdigit()]
+        if nums and len(nums[0]) == 4:
+            year = nums[0]
+            month = MONTHS[int(nums[1]) - 1] if len(nums) > 1 and 1 <= int(nums[1]) <= 12 else ''
+            day = str(int(nums[2])) if len(nums) > 2 and 1 <= int(nums[2]) <= 31 else ''
+            return ' '.join(x for x in (day, month, year) if x)
+    return None
+
+
 def wikitext_to_text(wikitext):
-    """Plain article text: templates, references, tables and file links removed; headings kept as lines."""
+    """Plain article text: references, tables, file links and layout templates removed; values written with
+    templates (measurements, dates, foreign-language words) kept as text; headings kept as lines."""
     import mwparserfromhell
     code = mwparserfromhell.parse(wikitext)
-    for node in list(code.ifilter_templates(recursive=False)):
-        _remove(code, node)
+    # Inner templates first (ifilter lists outer before inner, so reverse it): in {{nowrap|{{convert|5|m}}}}
+    # the convert becomes "5 m" before nowrap keeps its first parameter; doing nowrap first would lose it.
+    for node in reversed(list(code.ifilter_templates(recursive=True))):
+        try:
+            text = _template_text(node)
+        except (ValueError, IndexError):
+            text = None
+        if text is None:
+            _remove(code, node)
+        else:
+            try:
+                code.replace(node, text)
+            except ValueError:
+                pass
     for node in list(code.ifilter_tags(recursive=True)):
         if str(node.tag).strip().lower() in DROP_TAGS or str(node.tag).strip().lower() == 'table':
             _remove(code, node)
@@ -38,6 +106,10 @@ def wikitext_to_text(wikitext):
     text = re.sub(r'\{\|.*?\|\}', '', text, flags=re.S)           # leftover wiki tables
     text = re.sub(r"'{2,}", '', text)                                 # bold/italic quotes
     text = re.sub(r'\s*\((?:[\s,;:]|&nbsp;)*\)', '', text)            # brackets emptied by template removal
+    text = re.sub(r'\(\s*(?:[,;:]\s*)+', '(', text)                       # "( ; Tour Eiffel )" -> "(Tour Eiffel )"
+    text = re.sub(r'(?:\s*[,;:])+\s*\)', ')', text)
+    text = re.sub(r'\(\s+', '(', text)
+    text = re.sub(r'\s+\)', ')', text)
     text = re.sub(r' {2,}', ' ', text)
     text = re.sub(r'[ \t]+\n', '\n', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
@@ -128,7 +200,7 @@ def main():
                 break
     meta = dict(dataset='wikipedia-dump', dump=a.dump.name, tokens=counts, articles=articles, skipped_short=short,
                 skip_ids=str(a.skip_ids) if a.skip_ids else None, vocab_size=tok.get_vocab_size(),
-                cleaning='mwparserfromhell-strip-v1+terminal-headings-v1', min_chars=a.min_chars,
+                cleaning='mwparserfromhell-strip-v3-nested-value-templates+terminal-headings-v1', min_chars=a.min_chars,
                 tokenizer_sha256=hashlib.sha256((a.out / 'tokenizer.json').read_bytes()).hexdigest(),
                 dtype='little-endian uint16', validation='sha256(article id) first 8 hex digits modulo 100 == 0',
                 license='CC BY-SA 4.0 (Wikipedia text)')

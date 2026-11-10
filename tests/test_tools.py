@@ -134,6 +134,59 @@ class ToolTests(unittest.TestCase):
         for junk in ('Infobox','cite','thumb','wikitable','Category','()',"'''",'[['):
             self.assertNotIn(junk,text)
 
+    def test_wikitext_to_text_keeps_values_written_with_templates(self):
+        from prepare_wikidump import wikitext_to_text
+        source=("The '''Eiffel Tower''' ({{IPA|fr|tuʁ ɛfɛl}}; {{lang|fr|Tour Eiffel}}) is {{convert|330|m|ft}} tall, "
+                "and {{cvt|5|to|10|C}} warmer. It was named a "
+                "''{{lang|fr|monument historique}}'' in {{start date|1964|5|12}}, {{as of|2026|lc=y}}.{{Infobox x|a=1}}")
+        text=wikitext_to_text(source)
+        self.assertIn('The Eiffel Tower (Tour Eiffel) is 330 m tall',text)
+        self.assertIn('330 m tall, and 5 to 10 °C warmer',text)
+        self.assertIn('named a monument historique in 12 May 1964, as of 2026.',text)
+        for junk in ('IPA','Infobox','{{',';'):
+            self.assertNotIn(junk,text)
+        nested=wikitext_to_text('The wall is {{nowrap|{{convert|5|m}}}} high, built {{circa|{{date|1900}}}}. '
+                                '{{Infobox x|a={{convert|1|m}}}}Rest.')
+        self.assertEqual(nested,'The wall is 5 m high, built c. 1900. Rest.')
+
+    def test_combine_datasets_joins_splits_and_checks_tokenizer(self):
+        from combine_datasets import combine
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            def make(name,train,val,tok_bytes=b'{"tok": 1}'):
+                d=root/name;d.mkdir()
+                (d/'tokenizer.json').write_bytes(tok_bytes)
+                np.asarray(train,dtype='<u2').tofile(d/'train.bin');np.asarray(val,dtype='<u2').tofile(d/'val.bin')
+                (d/'metadata.json').write_text(json.dumps({'dataset':name,'vocab_size':300,'tokens':{'train':len(train),'val':len(val)},
+                    'tokenizer_sha256':hashlib.sha256(tok_bytes).hexdigest()}))
+                return d
+            a,b=make('a',[1,2,3],[4]),make('b',[5,6],[7,8])
+            meta=combine([a,b],root/'ab')
+            self.assertEqual(np.fromfile(root/'ab'/'train.bin',dtype='<u2').tolist(),[1,2,3,5,6])
+            self.assertEqual(np.fromfile(root/'ab'/'val.bin',dtype='<u2').tolist(),[4,7,8])
+            self.assertEqual(meta['tokens'],{'train':5,'val':3})
+            self.assertEqual([s['dataset'] for s in meta['sources']],['a','b'])
+            other=make('c',[1],[2],tok_bytes=b'{"tok": 2}')
+            with self.assertRaises(SystemExit): combine([a,other],root/'ac')
+            with self.assertRaises(SystemExit): combine([a,b],root/'ab')  # output not empty
+
+    def test_val_loss_is_repeatable_and_checks_tokenizer(self):
+        import torch
+        from model import GPT
+        from val_loss import val_loss
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);d=root/'data';d.mkdir()
+            np.random.default_rng(0).integers(0,300,2000).astype('<u2').tofile(d/'val.bin')
+            (d/'metadata.json').write_text(json.dumps({'tokenizer_sha256':'abc'}))
+            torch.manual_seed(0);model=GPT(vocab_size=300,context=16,width=32,layers=1,heads=2)
+            torch.save({'config':model.config,'model':model.state_dict(),'step':5,'data':{'tokenizer_sha256':'abc'}},root/'ck.pt')
+            first=val_loss(root/'ck.pt',d,blocks=6,batch=4)
+            self.assertEqual(first,val_loss(root/'ck.pt',d,blocks=6,batch=4))
+            self.assertEqual(first['step'],5)
+            self.assertTrue(4<first['loss']<8)  # near ln(300)=5.7 for an untrained model
+            (d/'metadata.json').write_text(json.dumps({'tokenizer_sha256':'other'}))
+            with self.assertRaises(SystemExit): val_loss(root/'ck.pt',d)
+
     def test_samples_and_export_checksums(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
