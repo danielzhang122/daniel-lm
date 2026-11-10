@@ -316,9 +316,93 @@ dy/dx ≈ ( y(x + 0.0001) − y(x − 0.0001) ) / 0.0002
 ```
 This is called a **finite difference**. Remember it, because in Chapter 16 we'll use it to check our code.
 
-A **gradient** is just a collection of derivatives, one per input. If a function has 34 million knobs, its gradient is 34 million numbers, each one saying "this knob: push this way, this hard."
+#### The derivative is the slope
 
-> 💡 **Key idea:** A derivative is a sensitivity: "nudge this, and that changes by this much." Training is entirely about computing these sensitivities for every knob.
+Draw `y = x²` as a curve. The derivative at a point is the **slope** of the curve right there: how steep it is, measured as **rise over run** (how far up you go for each step to the right).
+
+A curve has no single slope, because its steepness changes as you move along it. The trick is to **zoom in**. Look at `y = x²` near `x = 3`:
+
+| x | y = x² | rise (change in y) | run (change in x) | rise ÷ run |
+|---|---|---|---|---|
+| 3 → 4 | 9 → 16 | 7 | 1 | 7 |
+| 3 → 3.1 | 9 → 9.61 | 0.61 | 0.1 | 6.1 |
+| 3 → 3.01 | 9 → 9.0601 | 0.0601 | 0.01 | 6.01 |
+| 3 → 3.001 | 9 → 9.006001 | 0.006001 | 0.001 | 6.001 |
+
+The smaller the step, the closer rise ÷ run gets to **6**, and the formula `dy/dx = 2x` gives `2 × 3 = 6`. Zoomed in far enough, any smooth curve looks like a straight line, and the derivative is that line's slope. (The line is called the **tangent line**: the straight line that just touches the curve at that point.)
+
+What the sign and size of the slope tell you:
+
+| Slope | The curve here is... | Nudging x up makes y... |
+|---|---|---|
+| big positive (e.g. +6) | climbing steeply | go up a lot |
+| small positive (e.g. +0.1) | climbing gently | go up a little |
+| 0 | flat (the bottom of a valley or the top of a hill) | barely change |
+| negative (e.g. −10) | going downhill | go down |
+
+That last row is the whole basis of training: if you know which way is downhill, you know which way to move.
+
+#### Gradients: slopes in more than one direction
+
+A **gradient** is a collection of derivatives, one per input. Each one is a **partial derivative**: the slope when you nudge *that one input* and hold all the others still.
+
+**A 3D example.** Take a function with two inputs:
+```
+f(x, y) = x² + y²
+```
+Picture it as a landscape: `x` and `y` are your position on the ground (east–west and north–south), and `f` is the height. This one is a smooth **bowl** with its lowest point, height 0, at `(0, 0)`. Here are some heights:
+
+| | x = 0 | x = 1 | x = 2 | x = 3 |
+|---|---|---|---|---|
+| **y = 2** | 4 | 5 | 8 | 13 |
+| **y = 1** | 1 | 2 | 5 | **10** ← you are here |
+| **y = 0** | 0 (bottom) | 1 | 4 | 9 |
+
+Stand at `(3, 1)`, height 10. There's one slope per direction:
+- **East–west** (nudge x, hold y still): `∂f/∂x = 2x = 6`.
+- **North–south** (nudge y, hold x still): `∂f/∂y = 2y = 2`.
+
+(The curly `∂` just means "partial derivative": the slope along one input while the others stay fixed.)
+
+So the gradient at `(3, 1)` is the arrow **`[6, 2]`**. It's written `∇f`, read "grad f".
+
+#### The gradient points up the steepest slope
+
+The gradient isn't just a list of numbers: it's an **arrow on the ground**, and it points in the direction where the landscape **climbs fastest**. Its length is how steep that climb is.
+
+You can check this at `(3, 1)`. Take a small step of length 0.01 in different directions and see how much the height changes:
+
+| Direction you step | Height change (about) |
+|---|---|
+| Along the gradient `[6, 2]` | **+0.063** (the steepest climb possible) |
+| East only `[1, 0]` | +0.060 |
+| Diagonal `[1, 1]` | +0.057 |
+| North only `[0, 1]` | +0.020 |
+| Sideways, at a right angle to the gradient | 0 (walking along the bowl's side, staying level) |
+| **Against** the gradient `[−6, −2]` | **−0.063** (the steepest drop possible) |
+
+No direction climbs faster than the gradient, and none drops faster than its exact opposite. Why: the height change in any direction is the gradient's dot product with that direction, which is largest when the two point the same way. The climb along the gradient is its length, `√(6² + 2²) ≈ 6.32`, times the step size.
+
+So **the negative gradient points down the steepest slope**. Following it is called **steepest descent**, or **gradient descent**, and it's exactly how the model learns:
+
+```
+new position = position − learning_rate × gradient
+```
+
+One step from `(3, 1)` with learning rate 0.1:
+```
+(3, 1) − 0.1 × [6, 2] = (2.4, 0.8)
+height: 10  →  2.4² + 0.8² = 5.76 + 0.64 = 6.4      (downhill!)
+```
+Repeat this and you slide toward the bottom of the bowl at `(0, 0)`.
+
+Notice that the step moved `x` (the steep direction) more than `y` (the gentle one). Each input moves in proportion to its own slope.
+
+#### From 2 knobs to 34 million
+
+The bowl has 2 inputs, so you can picture it in 3D. Your model has about 34 million knobs, so its loss landscape has 34 million "ground" directions plus one for height. Nobody can picture that, but the math is identical: the gradient is an arrow with 34 million numbers, each one saying "this knob: push this way, this hard", and the negative gradient is still the steepest way down. Chapter 3 walks down this landscape, and Chapter 14 shows how to compute those 34 million numbers efficiently.
+
+> 💡 **Key idea:** A derivative is the slope of a curve: "nudge this, and that changes by this much." A gradient collects one slope per input and points up the steepest hill, so stepping *against* it is the steepest way down. Training is entirely about computing these slopes for every knob and stepping downhill.
 
 > **Q: A matrix of shape `(4, 3)` multiplies (`@`) a matrix of shape `(3, 7)`. What shape comes out?**
 >
