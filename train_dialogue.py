@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 from model import GPT
-from training_utils import learning_rate
+from training_utils import learning_rate,replace_checkpoint
 
 
 def main():
@@ -87,7 +87,7 @@ def main():
                 torch.save(dict(model=model.state_dict(),config=model.config,data=data,step=step,phase='dialogue',
                     optimizer=opt.state_dict(),rng=rng.bit_generator.state,sft_settings=settings,
                     dialogue_metadata=meta,transfer=source),temp)
-                temp.replace(dest)
+                replace_checkpoint(temp,dest)
                 print(f'Validation loss: {val:.4f}',flush=True)
 
 

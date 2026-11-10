@@ -1,5 +1,6 @@
 """Deterministic block coverage and a schedule independent of run length."""
 import math
+import time
 import numpy as np
 
 
@@ -63,6 +64,18 @@ def optimizer_state_with_backend(state, backend):
                                    foreach=False if backend == 'fused' else None)
                               for group in state['param_groups']]
     return result
+
+
+def replace_checkpoint(temp, dest, tries=60, wait=1.0):
+    """Move a finished save into place. On Windows this fails while another program (the dashboard, an
+    evaluation) has the old file open, so retry for about a minute instead of crashing the training run."""
+    for attempt in range(tries):
+        try:
+            return temp.replace(dest)
+        except PermissionError:
+            if attempt == tries - 1:
+                raise
+            time.sleep(wait)
 
 
 def learning_rate(step, peak, minimum, warmup, horizon):

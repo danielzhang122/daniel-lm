@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 from model import GPT
-from training_utils import (BlockSampler, learning_rate, validate_transfer,
+from training_utils import (BlockSampler, learning_rate, replace_checkpoint, validate_transfer,
                             validate_resume_training, optimizer_state_with_backend,
                             MODEL_SHAPE_DEFAULTS, resolve_model_shape)
 
@@ -179,7 +179,7 @@ def main():
                 if training:
                     state['training'] = training
                 torch.save(state, temp)
-                temp.replace(checkpoint)
+                replace_checkpoint(temp, checkpoint)
 
 
 if __name__ == '__main__':

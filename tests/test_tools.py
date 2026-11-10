@@ -187,6 +187,70 @@ class ToolTests(unittest.TestCase):
             (d/'metadata.json').write_text(json.dumps({'tokenizer_sha256':'other'}))
             with self.assertRaises(SystemExit): val_loss(root/'ck.pt',d)
 
+    def test_checkpoint_replace_waits_for_a_reader(self):
+        import threading,time
+        from training_utils import replace_checkpoint
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);dest=root/'latest.pt';new=root/'latest.tmp'
+            dest.write_bytes(b'old');new.write_bytes(b'new')
+            reader=dest.open('rb')  # another program reading the old checkpoint
+            threading.Timer(0.5,reader.close).start()
+            started=time.perf_counter()
+            replace_checkpoint(new,dest,tries=50,wait=0.05)
+            self.assertEqual(dest.read_bytes(),b'new')
+            self.assertFalse(new.exists())
+            if __import__('os').name=='nt':  # only Windows blocks replacing an open file
+                self.assertGreater(time.perf_counter()-started,0.4)
+            new.write_bytes(b'newer')
+            with dest.open('rb'):
+                if __import__('os').name=='nt':
+                    with self.assertRaises(PermissionError): replace_checkpoint(new,dest,tries=2,wait=0.01)
+
+    def test_eval_rag_scores_replies(self):
+        from eval_rag import score,summarize
+        ex=lambda answers,target:{'answerable':bool(answers),'answers':answers,
+                                  'messages':[{'role':'user','content':'q'},{'role':'assistant','content':target}]}
+        found=score('It was the Denver Broncos [2].',ex(['Denver Broncos'],'Denver Broncos [2].'))
+        self.assertEqual(found,dict(answerable=True,false_not_found=False,answer_found=True,right_passage=True))
+        wrong=score("The passages don’t say.",ex(['1964'],'1964 [1].'))  # curly apostrophe still counts
+        self.assertEqual((wrong['answer_found'],wrong['right_passage'],wrong['false_not_found']),(False,False,True))
+        self.assertTrue(score("the passages don't say",ex([],RAG_NOT_FOUND))['says_not_found'])
+        self.assertFalse(score('Paris [1].',ex([],RAG_NOT_FOUND))['says_not_found'])
+        self.assertEqual(summarize([found,wrong,score('x',ex([],RAG_NOT_FOUND))]),
+                         dict(answerable=2,unanswerable=1,answer_found_pct=50.0,right_passage_pct=50.0,
+                              says_not_found_pct=0.0,false_not_found_pct=50.0))
+
+    def test_eval_rag_runs_on_a_tiny_checkpoint(self):
+        import torch
+        from model import GPT
+        from eval_rag import evaluate
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);tok=tokenizer();tok.save(str(root/'tokenizer.json'))
+            digest=hashlib.sha256((root/'tokenizer.json').read_bytes()).hexdigest()
+            rows=[]
+            for i,(answers,target) in enumerate([(['wires'],'wires [1].'),([],RAG_NOT_FOUND),(['Hello'],'Hello [1].')]):
+                messages=[{'role':'user','content':rag_user_message([{'title':'Title','text':'Electricity runs through wires.'}],'Hello?')},
+                          {'role':'assistant','content':target}]
+                ids,labels=encode_messages(tok,messages)
+                rows.append(dict(ids=ids,labels=labels,messages=messages,source='squad_v2',answerable=bool(answers),answers=answers))
+            rows.append(dict(ids=rows[0]['ids'],labels=rows[0]['labels'],messages=rows[0]['messages'],source='smol'))
+            (root/'val.jsonl').write_text('\n'.join(json.dumps(r) for r in rows),encoding='utf-8')
+            (root/'metadata.json').write_text(json.dumps({'tokenizer_sha256':digest}))
+            torch.manual_seed(0);model=GPT(vocab_size=tok.get_vocab_size(),context=128,width=32,layers=1,heads=2)
+            for phase in ('pretrain','dialogue'):
+                torch.save({'config':model.config,'model':model.state_dict(),'step':7,'phase':phase,
+                            'data':{'tokenizer_sha256':digest}},root/f'{phase}.pt')
+            base=evaluate(root/'pretrain.pt',root,questions=5,tokens=4,log=lambda *_:None)
+            self.assertEqual(base['val_examples'],3)  # SQuAD rows only
+            self.assertNotIn('questions',base)        # no replies from a model that hasn't learned turns
+            self.assertTrue(3<base['answer_loss']<9)
+            chat=evaluate(root/'dialogue.pt',root,questions=5,tokens=4,samples=1,log=lambda *_:None)
+            self.assertEqual(chat['answer_loss'],base['answer_loss'])
+            self.assertEqual((chat['questions'],chat['answerable'],chat['unanswerable'],len(chat['samples'])),(3,2,1,1))
+            self.assertEqual(chat,evaluate(root/'dialogue.pt',root,questions=5,tokens=4,samples=1,log=lambda *_:None)|{'seconds':chat['seconds']})
+            (root/'metadata.json').write_text(json.dumps({'tokenizer_sha256':'other'}))
+            with self.assertRaises(SystemExit): evaluate(root/'dialogue.pt',root,log=lambda *_:None)
+
     def test_samples_and_export_checksums(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
