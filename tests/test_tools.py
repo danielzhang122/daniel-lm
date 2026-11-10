@@ -5,7 +5,9 @@ import tempfile
 import unittest
 import numpy as np
 from tokenizers import Tokenizer,models,pre_tokenizers,decoders,trainers
-from dialogue import encode_messages,chat_prompt
+from dialogue import encode_messages,chat_prompt,rag_user_message,RAG_NOT_FOUND
+import random
+import prepare_dialogue
 import library
 import sample_store
 from verify_bundle import verify
@@ -31,6 +33,34 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(labels[-1],tok.token_to_id('<eos>'))
         self.assertEqual(len(ids),len(labels))
         self.assertTrue(any(v!=-100 for v in labels))
+
+    def test_rag_examples_label_only_the_answer_and_keep_the_real_passage(self):
+        tok=tokenizer()
+        rows=[dict(id=str(i),title=f'T{i%3}',context=f'Passage {i} text. Electricity runs through wires.',question=f'Q{i}?',
+                   answers=dict(text=['wires'] if i%2 else [],answer_start=[0] if i%2 else [])) for i in range(12)]
+        made=list(prepare_dialogue.squad_conversations(rows,12,random.Random(0)))
+        self.assertEqual(len(made),12)
+        for messages,extra in made:
+            row=rows[int(extra['squad_id'])]
+            self.assertIn(row['context'],messages[0]['content'])
+            self.assertTrue(messages[0]['content'].endswith('Question: '+row['question']))
+            reply=messages[1]['content']
+            if extra['answerable']:
+                n=int(reply.split('[')[1].split(']')[0])
+                self.assertIn(f'[{n}] {row["title"]}: {row["context"]}',messages[0]['content'])
+            else:
+                self.assertEqual(reply,RAG_NOT_FOUND)
+            ids,labels=prepare_dialogue.encode(tok,messages,10_000)
+            prompt,_=encode_messages(tok,messages[:1])
+            self.assertTrue(all(v==-100 for v in labels[:len(prompt)]))
+            self.assertEqual(tok.decode([v for v in labels if v!=-100][:-1]),reply)
+
+    def test_over_long_conversations_are_dropped_not_cut(self):
+        tok=tokenizer()
+        messages=[dict(role='user',content=rag_user_message([dict(title='T',text='word '*400)],'Q?')),
+                  dict(role='assistant',content='Hello world.')]
+        self.assertIsNone(prepare_dialogue.encode(tok,messages,64))
+        self.assertIsNotNone(prepare_dialogue.encode(tok,messages,100_000))
 
     def test_chat_trims_old_turns_and_preserves_latest(self):
         tok=tokenizer()

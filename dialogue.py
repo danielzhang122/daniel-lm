@@ -16,6 +16,21 @@ def encode_messages(tok, messages):
     return ids, labels
 
 
+RAG_INSTRUCTION = 'Answer using only these passages.'
+RAG_NOT_FOUND = "The passages don't say."
+
+
+def rag_user_message(passages, question):
+    """One user message holding numbered library passages and the question.
+
+    Training data and the dashboard both build prompts here, so they always match.
+    """
+    lines = [RAG_INSTRUCTION]
+    lines += [f"[{i}] {p['title']}: {' '.join(p['text'].split())}" for i, p in enumerate(passages, 1)]
+    lines.append('Question: ' + ' '.join(question.split()))
+    return '\n'.join(lines)
+
+
 def chat_prompt(tok, messages, budget):
     if not messages or messages[-1].get('role')!='user':
         raise ValueError('Conversation must end with a user message')
