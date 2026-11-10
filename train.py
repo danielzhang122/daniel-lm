@@ -21,6 +21,10 @@ def main():
     p.add_argument('--batch', type=int, default=2)
     p.add_argument('--accum', type=int, default=8)
     p.add_argument('--context', type=int, default=512)
+    p.add_argument('--width', type=int, default=512)
+    p.add_argument('--layers', type=int, default=8)
+    p.add_argument('--heads', type=int, default=8)
+    p.add_argument('--compile', action='store_true', help='Use torch.compile for the forward pass (needs Triton)')
     p.add_argument('--eval-every', type=int, default=50)
     p.add_argument('--resume', action='store_true')
     p.add_argument('--init-from', type=Path, help='Transfer weights to new data; reset optimizer, steps and schedule')
@@ -33,8 +37,10 @@ def main():
     args = p.parse_args()
     if args.resume and args.init_from:
         p.error('--resume and --init-from are mutually exclusive')
-    if min(args.steps, args.batch, args.accum, args.context, args.eval_every) < 1:
+    if min(args.steps, args.batch, args.accum, args.context, args.eval_every, args.width, args.layers, args.heads) < 1:
         p.error('Numeric arguments must be positive')
+    if args.width % args.heads:
+        p.error('--width must be divisible by --heads')
     if not (0 <= args.warmup < args.schedule_steps and 0 <= args.min_lr <= args.lr and args.lr > 0):
         p.error('Require 0 <= warmup < schedule-steps and 0 <= min-lr <= lr, with lr > 0')
     training = dict(sampler='blocks-v1', batch=args.batch, accum=args.accum,
@@ -55,7 +61,8 @@ def main():
     checkpoint = args.out / 'latest.pt'
     if checkpoint.exists() and not args.resume:
         raise SystemExit('Checkpoint exists: use --resume or a new --out.')
-    model = GPT(vocab_size=meta['vocab_size'], context=args.context).cuda()
+    model = GPT(vocab_size=meta['vocab_size'], context=args.context, width=args.width,
+                layers=args.layers, heads=args.heads).cuda()
     opt = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.1,
                             fused=True if args.optimizer_backend == 'fused' else None)
     start = 0
@@ -106,10 +113,12 @@ def main():
         data = torch.from_numpy(packed).cuda()
         return data[:, :-1], data[:, 1:]
 
+    forward = torch.compile(model) if args.compile else model  # checkpoints still save `model`
+
     def loss(split, generator):
         x, y = batch(split, generator)
         with torch.autocast('cuda', dtype=dtype):
-            logits = model(x)
+            logits = forward(x)
             return F.cross_entropy(logits.reshape(-1, logits.size(-1)), y.reshape(-1))
 
     print(f'{sum(p.numel() for p in model.parameters()):,} parameters on {torch.cuda.get_device_name()}', flush=True)

@@ -39,6 +39,8 @@
 
 > 📁 **In the code**: where this lives in the repo.
 
+> 🖥️ **See it on the dashboard**: where to find this idea on the dashboard's **Model** page. Run `python dashboard.py`, open http://127.0.0.1:8765 and go to **Model**. Pick a checkpoint and type a prompt, and the page draws the real model's pieces for that prompt.
+
 Read in order. Every chapter builds on the one before.
 
 ---
@@ -550,6 +552,28 @@ Two important consequences:
 >
 > A: Every possible piece of text is made of bytes, and all 256 bytes are in the base vocabulary. Worst case, each byte becomes its own token.
 
+> 🖥️ **See it on the dashboard: "02 / Tokenization"**
+>
+> Type `The Solar System consists of planets` and the panel shows 8 boxes:
+>
+> | # | Box shows | Means | Token ID |
+> |---|---|---|---|
+> | 1 | `The` | "The" (start of text, no space) | 791 |
+> | 2 | `ĠSol` | " Sol" | 5865 |
+> | 3 | `ar` | "ar" | 275 |
+> | 4 | `ĠSystem` | " System" | 5569 |
+> | 5 | `Ġconsists` | " consists" | 7871 |
+> | 6 | `Ġof` | " of" | 270 |
+> | 7 | `Ġplan` | " plan" | 4281 |
+> | 8 | `ets` | "ets" | 1262 |
+>
+> - **`Ġ` means a space.** Byte-level BPE (Section 4.4) can't show an invisible space in a label, so the tokenizer prints the space byte as `Ġ`. `Ġof` is the 3-character piece " of". In the same way, **`Ċ` is a newline**.
+> - **Common words get one token, rarer words get split.** " System", " consists" and " of" are common enough in Wikipedia to be single tokens. "Solar" became " Sol" + "ar", and "planets" became " plan" + "ets": BPE never merged those full words, so they're built from smaller pieces.
+> - **The ID is the only thing the model sees.** "ĠSystem" is just the label. The model receives the number 5569.
+> - **"context 1,024"** is the most tokens the model can look at at once (Section 18.3).
+>
+> 🧪 **Try it:** type the same sentence with and without a space in front, and with `planets` vs `Planets`. Which tokens change, and why?
+
 ---
 
 ## Chapter 5: The data pipeline
@@ -621,6 +645,26 @@ Here's the whole GPT. Don't worry about the details yet. Each box gets its own c
 
 Important: the model predicts the next token **at every position at once**. Feed it 512 tokens and you get 512 predictions: what follows token 1, what follows tokens 1–2, what follows tokens 1–3, and so on. That's very efficient for training.
 
+> 🖥️ **See it on the dashboard: "01 / The forward pass"**
+>
+> The row of boxes, `Embedding → Block 1 → Block 2 → …`, is the diagram above turned sideways. The **forward pass** is the trip your token IDs take, left to right, to become a prediction. Click a box to see what that stage does and how many knobs it holds.
+>
+> The diagram above shows the original 34M model. The bigger model trained later (the `big` run) has the **same design, only larger**:
+>
+> | | Original (`full` run) | Bigger (`big` run) |
+> |---|---|---|
+> | Numbers per token (width) | 512 | 768 |
+> | Blocks | 8 | 12 |
+> | Attention heads per block | 8 (64 numbers each) | 12 (64 numbers each) |
+> | Context (max tokens) | 512 | 1,024 |
+> | Total knobs | 33.9 M | 98.4 M |
+>
+> So when the dashboard's Embedding box says **"768 dimensions"** and **"12,582,912 token + 786,432 position parameters"**, it's showing the big model:
+>
+> - 12,582,912 = 16,384 tokens × 768 numbers each.
+> - 786,432 = 1,024 positions × 768 numbers each.
+> - **"8 positions × 768 values"** means your 8-token prompt became a grid of shape (8, 768). That's the `(t, width)` shape from Section 2.3.
+
 ---
 
 ## Chapter 7: Embeddings, turning IDs into vectors
@@ -682,6 +726,8 @@ y = x @ W.T + b
 **The same `W` is applied to every token position independently.** If x is `(b, t, 512)` and W is `(2048, 512)`, then y is `(b, t, 2048)`, so every one of the b×t token vectors went through the same mixer.
 
 > 📁 **In the code:** `nn.Linear(width, 4 * width)` and similar in `model.py`. Note `bias=False` on the attention linears: they skip the bias.
+
+> 🧒 **ELI5, neurons:** people call each output number of a Linear layer a **neuron**. A neuron isn't a little brain cell inside the computer. It's one row of `W`, a recipe that says "take this much of input 1, this much of input 2, …, and add it all up". The weights in that row are its **connections**.
 
 ---
 
@@ -826,6 +872,16 @@ token 3:         ✓   ✓   ✓   ·
 token 4:         ✓   ✓   ✓   ✓
 ```
 
+> 🖥️ **See it on the dashboard: "03 / Inside attention: What can each token see?"**
+>
+> That grid is this exact table, drawn for your prompt. Each **row** is a token doing the looking (the **query**). Each **column** is a token being looked at (the **key**, the "Key position →" axis).
+>
+> - **Grey square = allowed:** the column's token comes at or before the row's token.
+> - **Dark outlined square = future / hidden:** masked to −∞, so it gets 0% attention.
+> - **Red square = the query you selected.** Row 1 ("The") can only see itself. Row 8 ("ets") can see all 8 tokens.
+>
+> The grey triangle always has the same shape, because it shows the **rule** for what's allowed, not what the model actually chose to look at. Inside the grey area, each of the 12 heads learns its own attention scores (Section 11.3). One head might put almost all its attention on a single earlier token.
+
 ### 11.5 Multiple heads
 
 Instead of one attention with width 512, the model runs **8 attentions in parallel** (8 **heads**), each on a 64-number slice. Each head can specialize. One might track "which noun does this pronoun refer to?", another "what was the last verb?", another "what's the topic?". Their outputs are glued back together (8 × 64 = 512) and passed through one more Linear layer, the **projection**.
@@ -874,6 +930,25 @@ Line by line:
 
 It widens 4×, squishes, and narrows back. Attention *moves* information between tokens. The MLP *processes* it within each token. Research suggests a lot of a model's factual knowledge is stored in these MLP weights.
 
+> 🖥️ **See it on the dashboard: "A look inside: Neurons & connections"**
+>
+> The three columns of dots are **one block's MLP**, left to right:
+>
+> | Column | What it is | Full size in the `big` model |
+> |---|---|---|
+> | Input features | the numbers coming into the MLP for one token | 768 |
+> | Hidden neurons | the outputs of Linear 1 (then GELU), the "widened" layer | 3,072 (= 4 × 768) |
+> | Output features | the outputs of Linear 2, which the residual adds back | 768 |
+>
+> - **Each line is one weight.** It's a single number inside Linear 1's `W` (the left half of the picture) or Linear 2's `W` (the right half). Training adjusted every one of them.
+> - **Red = positive weight, blue = negative weight.** Positive means "more of this input pushes this neuron up". Negative means "it pushes it down". Neither is "good" or "bad".
+> - **Brighter = bigger magnitude** (size ignoring the sign). A brighter line has more influence.
+> - **It's a sample, not the whole layer.** It draws 32 inputs, 48 hidden neurons and 32 outputs: 32×48 + 48×32 = 3,072 lines. The real Block 1 MLP has 768×3,072 + 3,072×768 ≈ 4.7 million weights, far too many to draw.
+> - **It shows weights, not activity.** These lines are the fixed knobs from the latest saved checkpoint, so they stay the same whatever prompt you type. What does change with each prompt are the *values* flowing through them (the **activations**), and this panel doesn't draw those. Attention, biases, LayerNorm and residuals aren't drawn either.
+> - **Block menu:** each of the 12 blocks has its own MLP with its own weights. Switch blocks and the pattern changes.
+>
+> 🧪 **Try it:** click a hidden neuron (a middle dot) and roughly count its red vs blue incoming lines. Then: if all 768 inputs were 1.0, what decides whether this neuron's total comes out positive or negative? (Answer: the sum of all 768 of its incoming weights, plus its bias.)
+
 ### 12.2 Residual connections: the shortcut
 
 Instead of `x = layer(x)`, every block does:
@@ -912,6 +987,19 @@ This "normalize, then do the thing, then add back" pattern is called **pre-norm*
 | Final LayerNorm | 2 × 512 | 1,024 |
 | Output head | *shares* the token embedding | 0 |
 | **Total** | | **33,854,464 ≈ 34 M** |
+
+The bigger `big` model uses the same formulas with width 768, 12 blocks and 1,024 positions:
+
+| Part | Knobs |
+|---|---|
+| Token embedding (16,384 × 768) | 12,582,912 |
+| Position embedding (1,024 × 768) | 786,432 |
+| Per block: QKV 1,769,472 + projection 589,824 + MLP 2,362,368 + 2,360,064 + LayerNorms 3,072 | 7,084,800 |
+| × 12 blocks | 85,017,600 |
+| Final LayerNorm | 1,536 |
+| **Total** | **98,388,480 ≈ 98 M** |
+
+Notice where the growth went. The blocks went from 25 M to 85 M knobs, while the embeddings grew only from 8.7 M to 13.4 M. Most of a bigger model's extra "brain" sits in its blocks.
 
 ---
 

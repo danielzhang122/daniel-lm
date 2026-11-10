@@ -2,7 +2,7 @@
 
 i went down an ai rabbit hole and now i'm a little scared they're gonna take over the world. so i'm building one from scratch (somewhat). hopefully it'll be my in with the machines if things get weird.
 
-in case the world actually ends, i'd like a quick little everything guide on hand, and preferably one that doesn't ask me to renew a subscription. i know i could just host a pre-trained llm locally, but wheres the fun in that? instead, i made a lobotomized model that kinda just spits out nonsense. so much for survival of the fittest.
+in case the world actually ends, i'd like a quick little everything guide on hand, and preferably one that doesn't ask me to renew a subscription. i know i could just host a pre-trained llm locally, but wheres the fun in that? instead, i made a useless model that kinda just spits out nonsense. so much for survival of the fittest.
 
 **the goal:** an offline companion that can hold simple conversations and help find information in a saved reference library. It's trained on my own hardware and runs locally, with no subscription or internet needed. the tokenizer isn't my code: it's huggingface's `tokenizers` library, trained on my wikipedia data to learn its vocabulary. huggingface's `datasets` downloads the data, and pytorch's autograd does the backprop. (to be changed, see below)
 
