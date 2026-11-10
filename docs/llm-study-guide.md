@@ -1597,14 +1597,87 @@ It writes to a temporary file first and then renames it, so a crash mid-save can
 
 ### 18.1 Temperature
 
-Dividing logits by a temperature `T` before softmax changes how "confident" the model is. Using logits `[2.0, 1.0, 0.1]`:
+> 🧒 **ELI5:** Temperature is a "boldness" knob for picking the next word. Turn it down and the model plays it safe, picking its favourite word almost every time. Turn it up and it takes more chances on words it rated lower, which makes it more surprising but also more likely to talk nonsense.
+
+**What it changes:** only how the next token is *picked*. Temperature doesn't change the model, its weights or what it knows. It's applied after the model has done its work and handed back its logits (Chapter 13), so you can change it on every request for free.
+
+**The rule:** divide every logit by the temperature `T`, then do softmax as usual.
+
+```
+probabilities = softmax(logits / T)
+```
+
+#### Worked example
+
+Say there are only 3 possible next tokens, with logits `[2.0, 1.0, 0.1]`. Here's every step at **T = 0.5** and at **T = 2.0**, using softmax from Section 13.2: `exp` each number, then divide each by their total.
+
+| Step | T = 0.5 | T = 2.0 |
+|---|---|---|
+| 1. Divide each logit by T | [4.0, 2.0, 0.2] | [1.0, 0.5, 0.05] |
+| 2. `exp` each one | [54.60, 7.39, 1.22] | [2.72, 1.65, 1.05] |
+| 3. Add them up | 63.21 | 5.42 |
+| 4. Divide each by the total | **[0.864, 0.117, 0.019]** | **[0.502, 0.304, 0.194]** |
+
+**Why it works:** dividing by a number **below 1** makes the gaps between logits **bigger** (2.0 vs 1.0 is a gap of 1; after dividing by 0.5 it's 4.0 vs 2.0, a gap of 2). `exp` turns bigger gaps into much bigger ratios, so the top token takes almost everything. Dividing by a number **above 1** shrinks the gaps, so the probabilities move closer together.
+
+The same logits at more temperatures:
 
 | Temperature | Probabilities | Effect |
 |---|---|---|
-| 0.5 | [0.864, 0.117, 0.019] | sharper: safe, repetitive |
+| 0.1 | [1.000, 0.000, 0.000] | almost always the top token ("greedy") |
+| 0.5 | [0.864, 0.117, 0.019] | sharper: safe, can get repetitive |
+| 0.7 | [0.766, 0.184, 0.051] | a bit sharper: used by the dashboard chat |
 | 0.8 (default) | [0.725, 0.208, 0.067] | slightly sharpened |
-| 1.0 | [0.659, 0.242, 0.099] | the model's real beliefs |
+| 1.0 | [0.659, 0.242, 0.099] | the model's real beliefs, unchanged |
 | 2.0 | [0.502, 0.304, 0.194] | flatter: creative, chaotic |
+
+Two things the table shows:
+- **The order never changes.** The token with the highest logit always has the highest probability at every temperature. Temperature only changes *how much more likely* it is.
+- **T = 1 does nothing,** because dividing by 1 leaves the logits as they are. **As T gets close to 0,** sampling turns into always picking the top token, which is called **greedy decoding**. T can't be exactly 0, since you can't divide by zero, so `generate.py` only accepts **0.1 to 2**.
+
+> 🔥 **Why is it called "temperature"?** It's the same temperature as in physics, and the math is the same formula. In physics, the **Boltzmann distribution** gives the chance that a molecule sits in a state with a certain energy:
+>
+> ```
+> chance of a state ∝ exp(−energy / temperature)
+> ```
+>
+> (`∝` means "is proportional to": you still divide by the total so the chances add up to 1, just like softmax.) Softmax with temperature is exactly this, with **logit = −energy**:
+>
+> ```
+> chance of a token ∝ exp(logit / T)
+> ```
+>
+> A high logit is like a low-energy, "comfortable" state.
+>
+> - **Cold:** the energy gaps matter a lot, so almost every molecule settles into the lowest-energy state (ice: molecules locked in place). The model "freezes" onto its top token.
+> - **Hot:** the gaps matter less, so molecules spread across many states, even high-energy ones (steam: chaotic). The model "boils" and hops between many tokens.
+>
+> AI borrowed the name because softmax came straight from statistical physics, where this formula had been used for about a century before neural networks existed.
+
+#### Choosing a temperature
+
+| Task | Good range | Why |
+|---|---|---|
+| Answering from library passages | 0.3–0.7 | You want the answer copied faithfully from the passage, not invented |
+| Normal chat | 0.7–0.9 | Natural wording without drifting off topic |
+| Stories, brainstorming | 0.9–1.2 | More variety, more surprising word choices |
+| Above about 1.3 | rarely useful | Small models start producing word salad |
+
+Low temperatures have their own failure: a small model at 0.3 often **loops**, repeating the same phrase, because its top choice after "the city of the city of" is again "the city of". If you see repetition, raise the temperature a little.
+
+> 🖥️ **See it on the dashboard:** the **Try** page has a temperature menu: **0.5 / focused**, **0.8 / balanced** (default), **1.1 / varied**. Use the same prompt and the same checkpoint and try all three; the higher one will wander more. The **Chat** page always uses **0.7**.
+
+> 📁 **In the code:** `generate.py`, line 51 divides by the temperature right after the model runs:
+> ```python
+> logits = model(x[:, -model.config['context']:])[:, -1, :] / args.temperature
+> ```
+> Then top-k (next section) and softmax are applied to these divided logits.
+
+> 🧪 **Try it:** with logits `[3.0, 1.0]`, work out the probabilities at T = 1 and at T = 0.5. How many times more likely is the first token in each case? (Answer: T = 1 gives [0.881, 0.119], so 7.4 times more likely, which is e² ≈ 7.39. T = 0.5 gives [0.982, 0.018], so 54.6 times more likely, e⁴ ≈ 54.6. Halving the temperature squared the ratio.)
+
+> **Q: Does a lower temperature make the model smarter?**
+>
+> A: No. It only makes it pick its existing favourite more often. If the model's favourite is wrong, a low temperature makes it wrong more consistently.
 
 ### 18.2 Top-k
 
@@ -1612,7 +1685,7 @@ Even unlikely tokens have some tiny probability, and across 16,384 tokens those 
 
 ### 18.3 Context window
 
-The model can only see 512 tokens. When the text gets longer, `generate.py` feeds only the **last 512** (`x[:, -context:]`). The model completely forgets anything earlier.
+The model can only see a fixed number of tokens: 512 for the original model, 1,024 for the `big` one. When the text gets longer, `generate.py` feeds only the **last** 512 or 1,024 (`x[:, -context:]`). The model completely forgets anything earlier.
 
 ---
 
