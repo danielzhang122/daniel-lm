@@ -484,6 +484,35 @@ The output of training is two things:
 1. **The vocabulary**: every token and its ID.
 2. **The merge rules, in order.** Order matters.
 
+#### How the IDs are numbered
+
+A token's ID is its **place in the vocabulary list**, *not* its position in your sentence. The starting characters get the first numbers, and each merge gets the next free number in the order it was learned. In the toy example:
+
+| Token | a | c | h | s | t | at | hat | cat | that |
+|---|---|---|---|---|---|---|---|---|---|
+| ID | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+
+Your real tokenizer works the same way:
+
+| IDs | What they are |
+|---|---|
+| 0, 1 | The special tokens `<unk>` and `<eos>` (Section 4.6) |
+| 2–257 | The 256 starting bytes (Section 4.4) |
+| 258 | The first merge learned: `Ġt` (a space + "t"; `Ġ` is how the tokenizer writes a space) |
+| 259 | The second merge: `he` |
+| … | one new ID per merge |
+| 16,383 | The last merge: `national` |
+
+Because the ID belongs to the token and not to the slot, **the same token always gets the same ID**, wherever it appears:
+
+```
+"the cat sat on the cat"
+ the   Ġcat  Ġsat  Ġon  Ġthe  Ġcat
+ 1220  6097  4788  328  264   6097
+```
+
+` cat` is 6097 both times. `the` (1220) and ` the` (264) differ because one has a leading space. So where does the model learn *where* each token sits? From a separate table, the **position embedding** (Section 7.2), which is added to the token's own vector.
+
 #### Encoding new text
 
 To tokenize a new word, split it into characters and then **apply merge rules in the order they were learned** until none apply:
