@@ -394,7 +394,24 @@ One step from `(3, 1)` with learning rate 0.1:
 (3, 1) − 0.1 × [6, 2] = (2.4, 0.8)
 height: 10  →  2.4² + 0.8² = 5.76 + 0.64 = 6.4      (downhill!)
 ```
-Repeat this and you slide toward the bottom of the bowl at `(0, 0)`.
+**Important: recompute the gradient at every new position.** The gradient `[6, 2]` was the slope at `(3, 1)` only. The ground has a different tilt at `(2.4, 0.8)`, so the next step uses the gradient *there*: `[2 × 2.4, 2 × 0.8] = [4.8, 1.6]`. Reusing `[6, 2]` would be walking on an old map: it would keep pushing in the same direction at the same strength, and could carry you straight past the bottom of the bowl.
+
+So each step is: **measure the slope where you're standing, step, measure again.**
+
+| Step | Position (x, y) | Gradient here `[2x, 2y]` | Height `x² + y²` |
+|---|---|---|---|
+| 0 | (3, 1) | [6, 2] | 10 |
+| 1 | (2.4, 0.8) | [4.8, 1.6] | 6.4 |
+| 2 | (1.92, 0.64) | [3.84, 1.28] | 4.096 |
+| 3 | (1.536, 0.512) | [3.072, 1.024] | 2.621 |
+| 4 | (1.229, 0.410) | [2.458, 0.819] | 1.678 |
+| 5 | (0.983, 0.328) | [1.966, 0.655] | 1.074 |
+
+Each row's position is the row above minus 0.1 × the row above's gradient. Two things to notice:
+- **The gradient shrinks as you approach the bottom**, because the bowl flattens out. So the steps get smaller on their own, even though the learning rate stays at 0.1.
+- At the very bottom, `(0, 0)`, the gradient is `[0, 0]`: flat ground, nowhere downhill to go, so the steps stop.
+
+Repeat this and you slide toward the bottom of the bowl at `(0, 0)`. In training, this is why the model has to run a fresh forward and backward pass every step: changing the knobs changes the landscape's slope under them, so last step's gradient is already out of date.
 
 Notice that the step moved `x` (the steep direction) more than `y` (the gentle one). Each input moves in proportion to its own slope.
 
