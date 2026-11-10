@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import dashboard
+from dialogue import rag_user_message
 
 
 class DashboardTests(unittest.TestCase):
@@ -39,6 +40,25 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(command[command.index('--prompt')+1], prompt)
             self.assertEqual(command[command.index('--tokenizer')+1].replace('\\', '/'),
                              'E:/wiki-llm/data/full/tokenizer.json')
+
+    def test_retrieval_adds_passages_to_the_last_message_only(self):
+        found=[dict(id=7,title='France',url='u',text='Paris is the capital of France.')]
+        history=[{'role':'user','content':'Hi'},{'role':'assistant','content':'Hello.'},{'role':'user','content':'What is the capital of France?'}]
+        with tempfile.TemporaryDirectory() as temp, patch.object(dashboard, 'ROOT', Path(temp)):
+            folder=Path(temp)/'runs'/'chat';folder.mkdir(parents=True);(folder/'latest.pt').touch()
+            (folder/'run.json').write_text(json.dumps({'data':'E:/wiki-llm/data/full','phase':'dialogue'}))
+            def sent(command): return json.loads(command[command.index('--messages-json')+1])
+            with patch.object(dashboard.library,'passages',return_value=found):
+                command,sources=dashboard.generation_request({'run':'chat','messages':history,'retrieve':True})
+            self.assertEqual(sent(command)[:2],history[:2])
+            self.assertEqual(sent(command)[-1]['content'],rag_user_message(found,'What is the capital of France?'))
+            self.assertEqual(sources[0]['title'],'France')
+            with patch.object(dashboard.library,'passages',return_value=[]):
+                command,sources=dashboard.generation_request({'run':'chat','messages':history,'retrieve':True})
+            self.assertEqual((sent(command),sources),(history,[]))
+            with patch.object(dashboard.library,'passages',side_effect=AssertionError('not called')):
+                command,sources=dashboard.generation_request({'run':'chat','messages':history})
+            self.assertEqual((sent(command),sources),(history,[]))
 
     def test_empty_workspace(self):
         with tempfile.TemporaryDirectory() as temp, patch.object(dashboard, 'ROOT', Path(temp)):

@@ -4,6 +4,7 @@ import json
 import os
 import re
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -11,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 import library
+from dialogue import rag_user_message
 import sample_store
 
 ROOT = Path(__file__).resolve().parent
@@ -28,6 +30,26 @@ class DashboardServer(ThreadingHTTPServer):
 
 
 def generation_command(payload):
+    return generation_request(payload)[0]
+
+
+def with_passages(messages):
+    """Put library passages for the latest question into the last user message only."""
+    if messages[-1]['role'] != 'user':
+        return messages, []
+    question = messages[-1]['content']
+    try:
+        found = library.passages(question)
+    except sqlite3.Error:
+        found = []  # library unavailable: answer without sources rather than fail
+    if not found:
+        return messages, []
+    sources = [dict(id=p['id'], title=p['title'], url=p['url'], text=p['text']) for p in found]
+    return messages[:-1] + [dict(role='user', content=rag_user_message(found, question))], sources
+
+
+def generation_request(payload):
+    """Validated generate.py command, plus the library sources used (if retrieval was asked for)."""
     if not isinstance(payload, dict):
         raise ValueError('Expected a JSON object.')
     run = payload.get('run', '')
@@ -55,10 +77,13 @@ def generation_command(payload):
     command = [sys.executable, str(ROOT / 'generate.py'), '--checkpoint', str(folder / 'latest.pt'),
             '--tokenizer', str(data / 'tokenizer.json'), '--prompt', prompt, '--tokens', str(tokens),
             '--temperature', str(temperature), '--device', 'cpu', '--json']
+    sources = []
     if messages is not None:
         if config.get('phase')!='dialogue': raise ValueError('Choose a dialogue-trained run; current pretraining runs are text completion only.')
+        if payload.get('retrieve') is True:
+            messages, sources = with_passages(messages)
         command += ['--messages-json',json.dumps(messages)]
-    return command
+    return command, sources
 
 
 def read_json(path, default):
@@ -129,7 +154,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get_content_type() != 'application/json':
                 raise ValueError('Expected application/json.')
             payload = json.loads(self.rfile.read(length))
-            command = generation_command(payload)
+            command, sources = generation_request(payload)
         except (ValueError, UnicodeDecodeError) as exc:
             self.send_json(400, {'error': str(exc)})
             return
@@ -162,6 +187,7 @@ class Handler(BaseHTTPRequestHandler):
                 generated = json.loads(result.stdout)
                 generated['sample_id'] = sample_store.save(payload['run'],payload.get('prompt') or payload['messages'][-1]['content'],generated,
                     payload.get('temperature',.8),payload.get('tokens',80))
+                generated['sources'] = sources
                 self.send_json(200, generated)
         except subprocess.TimeoutExpired:
             self.send_json(504, {'error': 'Generation took too long. Try fewer tokens or a shorter prompt.'})

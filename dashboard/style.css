@@ -8,3 +8,5 @@ nav{display:flex;gap:20px;font-size:11px}nav a{color:#999;text-decoration:none}n
 @media(max-width:640px){main{padding:22px 18px 40px}header{align-items:flex-start;gap:12px}.toolbar{align-items:flex-start;flex-direction:column}.stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.actiongrid{grid-template-columns:1fr;gap:24px}.actiongrid p{min-height:0}#connection{max-width:160px;text-align:right}}
 
 nav{flex-wrap:wrap}.saved-sample,.search-result{border-bottom:1px solid #262626;padding:20px 0}.text-link{background:none;border:0;padding:0;text-align:left;text-decoration:underline;color:#ddd}#articlePanel{border:1px solid #383838;padding:20px;margin-top:24px}#articleSource{color:#999;font-size:11px}#searchForm input{width:100%;max-width:400px}
+
+.toolbar .check{gap:8px}.chat-sources{margin-top:6px;color:#999;font-size:11px}.chat-sources summary{cursor:pointer}.chat-source{padding:8px 0 0 12px}.chat-source p{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}

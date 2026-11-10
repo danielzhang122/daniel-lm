@@ -92,6 +92,48 @@ class ToolTests(unittest.TestCase):
             self.assertIn('wires',library.article(hits[0]['id'],db)['body'])
             self.assertEqual(library.search('" OR *',db),[])
 
+    def test_library_adds_a_second_dataset_and_retrieves_passages(self):
+        tok=tokenizer()
+        def dataset(root,name,articles,extra):
+            data=root/name;data.mkdir();tok.save(str(data/'tokenizer.json'))
+            packed={'train':[],'val':[]}
+            for s,body in articles:
+                split='val' if int(hashlib.sha256(s['id'].encode()).hexdigest()[:8],16)%100==0 else 'train'
+                packed[split]+=tok.encode(s['title']+'\n\n'+body).ids+[tok.token_to_id('<eos>')]
+            for split in packed: np.array(packed[split] or [tok.token_to_id('<eos>')],dtype='<u2').tofile(data/(split+'.bin'))
+            (data/'sources.jsonl').write_text(''.join(json.dumps(s)+'\n' for s,_ in articles))
+            (data/'metadata.json').write_text(json.dumps({'tokenizer_sha256':hashlib.sha256((data/'tokenizer.json').read_bytes()).hexdigest(),**extra}))
+            return data
+        para='Electricity runs through copper wires in houses and is measured in watts by the meter.'
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);db=root/'library.sqlite'
+            first=dataset(root,'a',[(dict(id='1',title='Wires',url='u1'),'Intro text that is long enough to count as a paragraph here.\n\n'+para)],{'n':1})
+            second=dataset(root,'b',[(dict(id='2',title='Electricity',url='u2'),'Electricity is the flow of charge through wires, and it powers lights in every house.')],{'n':2})
+            library.build(first,db,0);library.build(second,db,0)
+            st=library.status(db);self.assertEqual((st['articles'],st['complete'],st['datasets']),(2,True,2))
+            library.build(second,db,0);self.assertEqual(library.status(db)['articles'],2)  # resuming adds nothing
+            hits=library.passages('What is electricity?',k=2,path=db)
+            self.assertEqual(hits[0]['title'],'Electricity')  # exact title match ranks first
+            best=library.passages('copper wires meter',k=1,path=db)
+            self.assertEqual(best[0]['title'],'Wires')
+            self.assertIn('copper',best[0]['text'])
+            self.assertEqual(library.passages('the of and',path=db),[])
+            overlap=dataset(root,'c',[(dict(id='1',title='Wires',url='u1'),'Duplicate article text that should be refused.')],{'n':3})
+            with self.assertRaisesRegex(ValueError,'already in the library'): library.build(overlap,db,0)
+
+    def test_wikitext_to_text_keeps_prose_and_drops_markup(self):
+        from prepare_wikidump import wikitext_to_text
+        source=("{{Infobox city|name=Paris}}\n"
+                "'''Paris''' ({{IPA|fr|pari}}) is the [[capital city|capital]] of [[France]].<ref>{{cite web|url=x}}</ref>\n"
+                "[[File:Paris.jpg|thumb|A view]]\n"
+                '{| class="wikitable"\n| a || b\n|}\n'
+                "== History ==\nIt was founded long ago.\n[[Category:Cities]]")
+        text=wikitext_to_text(source)
+        self.assertIn('Paris is the capital of France.',text)
+        self.assertIn('History',text);self.assertIn('It was founded long ago.',text)
+        for junk in ('Infobox','cite','thumb','wikitable','Category','()',"'''",'[['):
+            self.assertNotIn(junk,text)
+
     def test_samples_and_export_checksums(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
