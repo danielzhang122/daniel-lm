@@ -184,7 +184,7 @@ You need five ideas. Each one is small.
 
 A **vector** is a list of numbers, like `[0.2, -1.5, 3.0]`. Its **size** (or **dimension**) is how many numbers it has. That one has size 3.
 
-In your model, every token is represented as a vector of **512 numbers**. You can think of it as a "personality profile" for that token, where each number measures some trait. Nobody chooses the traits; the model learns them.
+In your model, every token is represented as a vector of **512 numbers**. That size is the model's **width** (`width` in `model.py`); the bigger `big` run uses a width of 768. You can think of it as a "personality profile" for that token, where each number measures some trait. Nobody chooses the traits; the model learns them.
 
 ### 2.2 Matrices and matrix multiplication
 
