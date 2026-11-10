@@ -2,7 +2,8 @@ import unittest
 import numpy as np
 from cleaning import clean_article
 from training_utils import (BlockSampler, learning_rate, validate_transfer,
-                            validate_resume_training, optimizer_state_with_backend)
+                            validate_resume_training, optimizer_state_with_backend,
+                            resolve_model_shape)
 
 
 class TrainingTests(unittest.TestCase):
@@ -19,6 +20,21 @@ class TrainingTests(unittest.TestCase):
         self.assertIsNone(default['param_groups'][0]['foreach'])
         self.assertIs(optimizer_state_with_backend(state,None),state)
         with self.assertRaises(ValueError): optimizer_state_with_backend(state,'invalid')
+
+    def test_model_shape_defaults_overrides_and_saved_checkpoint(self):
+        none = dict(context=None, width=None, layers=None, heads=None)
+        self.assertEqual(resolve_model_shape(none), dict(context=512, width=512, layers=8, heads=8))
+        self.assertEqual(resolve_model_shape({**none, 'width': 768, 'heads': 12})['width'], 768)
+        saved = dict(vocab_size=16384, context=1024, width=768, layers=12, heads=12)
+        resumed = resolve_model_shape(none, saved)
+        self.assertEqual(resumed, dict(context=1024, width=768, layers=12, heads=12))
+        self.assertEqual(resolve_model_shape({**none, 'layers': 12}, saved), resumed)
+        with self.assertRaisesRegex(ValueError, 'does not match the saved model'):
+            resolve_model_shape({**none, 'width': 512}, saved)
+        with self.assertRaisesRegex(ValueError, 'divisible'):
+            resolve_model_shape({**none, 'width': 100, 'heads': 12})
+        with self.assertRaisesRegex(ValueError, 'positive'):
+            resolve_model_shape({**none, 'layers': 0})
 
     def test_resume_accepts_only_same_effective_batch_and_schedule(self):
         previous=dict(sampler='blocks-v1',batch=2,accum=8,horizon=10000,lr=.001)

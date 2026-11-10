@@ -10,7 +10,8 @@ import torch
 from torch.nn import functional as F
 from model import GPT
 from training_utils import (BlockSampler, learning_rate, validate_transfer,
-                            validate_resume_training, optimizer_state_with_backend)
+                            validate_resume_training, optimizer_state_with_backend,
+                            MODEL_SHAPE_DEFAULTS, resolve_model_shape)
 
 
 def main():
@@ -20,10 +21,11 @@ def main():
     p.add_argument('--steps', type=int, default=100)
     p.add_argument('--batch', type=int, default=2)
     p.add_argument('--accum', type=int, default=8)
-    p.add_argument('--context', type=int, default=512)
-    p.add_argument('--width', type=int, default=512)
-    p.add_argument('--layers', type=int, default=8)
-    p.add_argument('--heads', type=int, default=8)
+    # Model shape: defaults 512/512/8/8 for a new model; read from the checkpoint on --resume/--init-from.
+    p.add_argument('--context', type=int)
+    p.add_argument('--width', type=int)
+    p.add_argument('--layers', type=int)
+    p.add_argument('--heads', type=int)
     p.add_argument('--compile', action='store_true', help='Use torch.compile for the forward pass (needs Triton)')
     p.add_argument('--eval-every', type=int, default=50)
     p.add_argument('--resume', action='store_true')
@@ -37,10 +39,22 @@ def main():
     args = p.parse_args()
     if args.resume and args.init_from:
         p.error('--resume and --init-from are mutually exclusive')
-    if min(args.steps, args.batch, args.accum, args.context, args.eval_every, args.width, args.layers, args.heads) < 1:
+    if min(args.steps, args.batch, args.accum, args.eval_every) < 1:
         p.error('Numeric arguments must be positive')
-    if args.width % args.heads:
-        p.error('--width must be divisible by --heads')
+    checkpoint = args.out / 'latest.pt'
+    ck = source = None
+    if args.resume:
+        if not checkpoint.exists():
+            p.error(f'Nothing to resume: {checkpoint} does not exist.')
+        ck = torch.load(checkpoint, map_location='cpu', weights_only=False)  # own local checkpoint only
+    if args.init_from:
+        source = torch.load(args.init_from, map_location='cpu', weights_only=False)
+    saved = (ck or source or {}).get('config')
+    try:
+        shape = resolve_model_shape({k: getattr(args, k) for k in MODEL_SHAPE_DEFAULTS}, saved)
+    except ValueError as exc:
+        p.error(str(exc))
+    args.context = shape['context']
     if not (0 <= args.warmup < args.schedule_steps and 0 <= args.min_lr <= args.lr and args.lr > 0):
         p.error('Require 0 <= warmup < schedule-steps and 0 <= min-lr <= lr, with lr > 0')
     training = dict(sampler='blocks-v1', batch=args.batch, accum=args.accum,
@@ -58,25 +72,21 @@ def main():
     if any(len(a) <= args.context for a in arrays.values()):
         raise SystemExit('Both splits need more than context tokens. Prepare more articles.')
     args.out.mkdir(parents=True, exist_ok=True)
-    checkpoint = args.out / 'latest.pt'
     if checkpoint.exists() and not args.resume:
         raise SystemExit('Checkpoint exists: use --resume or a new --out.')
-    model = GPT(vocab_size=meta['vocab_size'], context=args.context, width=args.width,
-                layers=args.layers, heads=args.heads).cuda()
+    model = GPT(vocab_size=meta['vocab_size'], **shape).cuda()
     opt = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.1,
                             fused=True if args.optimizer_backend == 'fused' else None)
     start = 0
     transfer = None
     validation_batch_size = args.batch
     if args.init_from:
-        source = torch.load(args.init_from, map_location='cpu', weights_only=False)
         validate_transfer(source, model.config, meta)
         model.load_state_dict(source['model'])
         transfer = dict(checkpoint=str(args.init_from.resolve()), source_step=source['step'])
         print(f'Transferred weights from step {source["step"]}; starting a new data stage at step 0.', flush=True)
         del source
     if args.resume:
-        ck = torch.load(checkpoint, map_location='cpu', weights_only=False)  # own local checkpoint only
         if ck['config'] != model.config or ck['data'] != meta:
             raise SystemExit('Checkpoint model/data mismatch.')
         if 'training' in ck:

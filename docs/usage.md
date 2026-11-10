@@ -6,13 +6,15 @@ Full reference for running daniellm. The [README](../README.md) has the short ve
 
 | Stage | State |
 |---|---|
-| Wikipedia pretraining | Done (full-data stage, continued from the cleaned 100k-article experiment) |
+| Wikipedia pretraining, 34M model | Done (full-data stage, continued from the cleaned 100k-article experiment) |
+| Wikipedia pretraining, 98M model | Running (`runs/big`) |
+| FineWeb-Edu data (3B tokens) | Prepared at `E:\wiki-llm\data\fineweb-edu`, for a stage after `runs/big` |
 | Dialogue training | Pipeline tested; run it after pretraining finishes |
 | Dashboard (charts, try the model, model explorer) | Working |
 | Offline library search | Starter index of 10,000 articles; indexer can resume to more |
 | Portable export for the Dell | Exported and tested locally; Linux install on the Dell not yet tested |
 
-Expect limited ability from 34M parameters: repetition, weak reasoning and made-up facts. Wikipedia pretraining alone doesn't teach conversation or factual accuracy. Treat it as a helper for reading references, not an authority.
+Expect limited ability from models this small: repetition, weak reasoning and made-up facts. Wikipedia pretraining alone doesn't teach conversation or factual accuracy. Treat it as a helper for reading references, not an authority.
 
 ## Files
 
@@ -20,6 +22,7 @@ Expect limited ability from 34M parameters: repetition, weak reasoning and made-
 |---|---|
 | `model.py` | The GPT model |
 | `prepare.py`, `cleaning.py` | Download and clean Wikipedia, train the tokenizer, write `train.bin` / `val.bin` |
+| `prepare_fineweb.py` | Download FineWeb-Edu and pack it with an existing tokenizer, for a later stage |
 | `train.py`, `training_utils.py` | Pretraining loop (resume, LR schedule, block sampler) |
 | `train_full.py` | Shortcut for the full-Wikipedia training command |
 | `generate.py` | Text generation from a checkpoint |
@@ -69,10 +72,24 @@ python train_full.py --steps 10000  # stop earlier to review progress
 ```
 `train_full.py` loads the weights from `runs/clean-100k/latest.pt` and saves to `runs/full` every 500 steps. Ctrl+C stops it, and running the same command resumes from the last save.
 
+**Bigger model** (`runs/big`, 98M parameters, about 60k tokens/s, one Wikipedia pass in about 21 hours):
+```powershell
+python train.py --data E:/wiki-llm/data/full --out runs/big --steps 275000 --schedule-steps 275000 --warmup 2000 --lr 0.0003 --min-lr 0.00003 --eval-every 1000 --batch 16 --accum 1 --context 1024 --width 768 --layers 12 --heads 12 --optimizer-backend fused --compile
+```
+To resume, run the same command with `--resume` added. The exact command is saved in `runs/big/command.txt`.
+
+**FineWeb-Edu** (educational web text, for a later stage). It must reuse the tokenizer of the model you'll continue:
+```powershell
+$env:HF_HOME = 'E:\wiki-llm\hf-cache'   # keep the download cache off the nearly full C: drive
+python prepare_fineweb.py --tokenizer E:/wiki-llm/data/full/tokenizer.json --out E:/wiki-llm/data/fineweb-edu --tokens 3000000000
+```
+
 **How training options work:**
 - `--steps` is the total target, counting steps already done. It isn't "this many more".
 - `--resume` continues the same run with its optimizer state and data position.
-- `--init-from` copies only the weights into a new run, with a fresh optimizer and schedule. It needs the same tokenizer and architecture as the source run.
+- `--init-from` copies only the weights into a new run, with a fresh optimizer and schedule. It needs the same tokenizer as the source run.
+- Model size is set with `--width`, `--layers`, `--heads` and `--context` (defaults 512, 8, 8 and 512). With `--resume` or `--init-from` you can leave them out: they're read from the checkpoint, and a value that doesn't match is an error.
+- `--compile` speeds up the model code with `torch.compile`. It needs `pip install "triton-windows<3.8"` on Windows. On this GPU it made no measurable difference, because the GPU was already 100% busy.
 - Keep `--schedule-steps` the same whenever you resume.
 - You can change `--batch` and `--accum` on resume as long as `batch × accum` stays the same.
 - `prepare.py` refuses to write into a folder that isn't empty.

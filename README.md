@@ -8,7 +8,14 @@ in case the world actually ends, i'd like a quick little everything guide on han
 
 i intend to eventually rewrite the backprop myself, or at least try to. i was told it would be a good exercise. to help teach me, i had claude generate me [this study guide](docs/llm-study-guide.md) in order to get me up to speed on how language models work at a lower level. essentially i'm using an llm to learn about llms so i can make an llm.
 
-**the model:** a byte-level BPE tokenizer (huggingface's `tokenizers` library, with a vocabulary trained on this data) and a GPT-style decoder trained from random weights (no pretrained weights). About 34M parameters: 8 layers, width 512, 8 attention heads, 512-token context, 16,384-token vocabulary, tied input/output embeddings. Built for an RTX 4070 Ti (12 GB).
+**the model:** a byte-level BPE tokenizer (huggingface's `tokenizers` library, with a vocabulary trained on this data) and a GPT-style decoder trained from random weights (no pretrained weights). 16,384-token vocabulary, tied input/output embeddings. Built for an RTX 4070 Ti (12 GB). two sizes so far:
+
+| | first model (`runs/full`) | bigger model (`runs/big`) |
+|---|---|---|
+| parameters | 34M | 98M |
+| layers / width / heads | 8 / 512 / 8 | 12 / 768 / 12 |
+| context | 512 tokens | 1,024 tokens |
+| speed on the 4070 Ti | ~155k tokens/s | ~60k tokens/s |
 
 i also generated a really quick front-end to help me visualize training in real time. im finally putting my $3K gaming pc to use and doing something other than playing roblox.
 
@@ -16,7 +23,7 @@ tokenizers, transformers, neural networks, yada yada yada
 
 ## status
 
-wikipedia pretraining is done, and right now it's just a dumb little ai: it repeats itself and makes things up, as you'd expect from 34m parameters. dialogue training, the offline library and the portable export are not finished.
+the 34m model finished wikipedia and it's a dumb little ai: it repeats itself and makes things up. it had already seen ~130 tokens per parameter, so more training wouldn't help much. now training the 98m model on all of wikipedia (one pass, ~21 hours). next: a second stage on [fineweb-edu](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu) (educational web text, 3B tokens), then dialogue training. the offline library and the portable export are not finished.
 
 ## install (windows, python 3.13, nvidia gpu)
 
@@ -32,6 +39,7 @@ py -3.13 -m venv .venv
 ```powershell
 python prepare.py --articles 10000         # download and tokenize a small slice of Wikipedia
 python train.py --steps 100                # short training run (output will be gibberish)
+python train.py --steps 100 --width 768 --layers 12 --heads 12 --context 1024 --out runs/bigger  # a bigger model
 python generate.py --prompt 'The Solar System'
 python dashboard.py                        # then open http://127.0.0.1:8765
 ```

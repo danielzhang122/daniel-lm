@@ -11,6 +11,30 @@ def validate_transfer(checkpoint, config, metadata):
         raise ValueError('Transfer requires the identical tokenizer, not just the same vocabulary size.')
 
 
+MODEL_SHAPE_DEFAULTS = dict(context=512, width=512, layers=8, heads=8)
+
+
+def resolve_model_shape(requested, saved=None):
+    """Use the saved model's shape when continuing one; otherwise the request or defaults.
+
+    `requested` holds command-line values, with None meaning "not given".
+    """
+    shape = {}
+    for key, default in MODEL_SHAPE_DEFAULTS.items():
+        value = requested.get(key)
+        if saved is not None:
+            if value is not None and value != saved[key]:
+                raise ValueError(f'--{key} {value} does not match the saved model ({saved[key]}); omit it.')
+            shape[key] = saved[key]
+        else:
+            shape[key] = default if value is None else value
+    if min(shape.values()) < 1:
+        raise ValueError('Model sizes must be positive')
+    if shape['width'] % shape['heads']:
+        raise ValueError('--width must be divisible by --heads')
+    return shape
+
+
 def validate_resume_training(previous, current):
     """Allow regrouping microbatches only when the effective batch is unchanged."""
     if not isinstance(previous, dict) or not isinstance(current, dict):

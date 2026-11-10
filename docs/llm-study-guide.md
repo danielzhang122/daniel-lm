@@ -104,6 +104,8 @@ Don't worry if these don't make sense yet. Each one is explained properly in its
 | **8,192** | tokens per training step on the full run | `train_full.py` uses `--batch 16 --accum 1`, and 16 × 512 = 8,192. |
 | **550,550** | steps in the full run | 4.5 billion tokens ÷ 8,192 tokens per step ≈ 550,000, so the model reads the whole dataset about once. |
 
+These are the numbers for the first, 34M model. The bigger `big` run uses width **768**, **12** layers, **12** heads (still 64 numbers per head), a **1,024**-token context and **~98 million** parameters. Its size is set with `--width`, `--layers`, `--heads` and `--context` in `train.py`. Chapter 6 compares the two side by side.
+
 **The hardware:** one RTX 4070 Ti graphics card (12 GB of memory). The model size was picked so it trains on that card in a reasonable time.
 
 **Code you'll see referenced:** `prepare.py` builds the data and tokenizer, `model.py` is the model, `train.py` is the training loop, and `generate.py` writes text. [Appendix B](#appendix-b-map-of-the-repository) maps every file.
@@ -1858,6 +1860,7 @@ Train a tiny model (width 64, 2 layers, context 64) on a slice of `val.bin` for 
 |---|---|---|
 | `cleaning.py` | Strips junk sections from Wikipedia articles | 5 |
 | `prepare.py` | Downloads data, trains the tokenizer, writes `train.bin` / `val.bin` | 4, 5 |
+| `prepare_fineweb.py` | Downloads FineWeb-Edu (educational web text) and packs it with the existing tokenizer | 5 |
 | `model.py` | The GPT model (43 lines) | 6–13 |
 | `training_utils.py` | Learning-rate schedule, block sampler, resume checks | 17 |
 | `train.py` | The pre-training loop | 17 |
