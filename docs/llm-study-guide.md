@@ -426,6 +426,29 @@ guess = w × x
 ```
 If `w = 3` and `x = 2`, the guess is 6. Change the knob and the guess changes. Your real model is the same idea with **about 34 million knobs**.
 
+**Why call them knobs?** Because of what you're allowed to do with them. `x` is the input: it's given to you, you can't change it. `w` is yours to set, and the only thing you ever do to it is turn it up or down a little. That's all "knob" means here: a number you can turn up or down. Training never adds knobs, removes them, or rewires anything. It only turns the same knobs, again and again.
+
+**Two knobs.** Add a second number that gets added on at the end:
+```
+guess = a × x + b
+```
+Now there are two knobs, `a` and `b`. Keep the input `x = 2` and suppose the right answer is 10:
+
+| a | b | guess = a × 2 + b | how far off |
+|---|---|---|---|
+| 3 | 0 | 6 | 4 too low |
+| 4 | 0 | 8 | 2 too low |
+| 3 | 4 | 10 | right |
+| 5 | 0 | 10 | right |
+| 4 | 2 | 10 | right |
+
+Things to notice:
+- **Each knob changes the guess by a different amount.** Turning `a` up by 1 raises the guess by 2 (because `a` is multiplied by `x = 2`). Turning `b` up by 1 raises it by 1. So the same turn matters more on one knob than the other. That difference is exactly what the gradient measures for each knob (Section 3.3).
+- **Many settings can give the right answer.** With one example to match, there's no single "correct" pair. Real training shows the model millions of examples, and the knobs have to end up working for all of them at once, which narrows things down a lot.
+- **You can't set each knob on its own.** The best `b` depends on where `a` is, and the other way round. That's why training nudges all the knobs a little at a time, instead of finishing one knob and moving to the next.
+
+The real model is this with 34 million knobs: one long formula, a lot of multiplying and adding, and every one of those numbers can be turned up or down.
+
 ### 3.2 Loss: grading the guess
 
 The **loss** is a single number that measures how bad the guess was. **Lower is better. Zero is perfect.**
