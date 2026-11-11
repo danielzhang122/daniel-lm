@@ -394,26 +394,7 @@ One step from `(3, 1)` with learning rate 0.1:
 (3, 1) − 0.1 × [6, 2] = (2.4, 0.8)
 height: 10  →  2.4² + 0.8² = 5.76 + 0.64 = 6.4      (downhill!)
 ```
-**Important: recompute the gradient at every new position.** The gradient `[6, 2]` was the slope at `(3, 1)` only. The ground has a different tilt at `(2.4, 0.8)`, so the next step uses the gradient *there*: `[2 × 2.4, 2 × 0.8] = [4.8, 1.6]`. Reusing `[6, 2]` would be walking on an old map: it would keep pushing in the same direction at the same strength, and could carry you straight past the bottom of the bowl.
-
-So each step is: **measure the slope where you're standing, step, measure again.**
-
-| Step | Position (x, y) | Gradient here `[2x, 2y]` | Height `x² + y²` |
-|---|---|---|---|
-| 0 | (3, 1) | [6, 2] | 10 |
-| 1 | (2.4, 0.8) | [4.8, 1.6] | 6.4 |
-| 2 | (1.92, 0.64) | [3.84, 1.28] | 4.096 |
-| 3 | (1.536, 0.512) | [3.072, 1.024] | 2.621 |
-| 4 | (1.229, 0.410) | [2.458, 0.819] | 1.678 |
-| 5 | (0.983, 0.328) | [1.966, 0.655] | 1.074 |
-
-Each row's position is the row above minus 0.1 × the row above's gradient. Two things to notice:
-- **The gradient shrinks as you approach the bottom**, because the bowl flattens out. So the steps get smaller on their own, even though the learning rate stays at 0.1.
-- At the very bottom, `(0, 0)`, the gradient is `[0, 0]`: flat ground, nowhere downhill to go, so the steps stop.
-
-Repeat this and you slide toward the bottom of the bowl at `(0, 0)`. In training, this is why the model has to run a fresh forward and backward pass every step: changing the knobs changes the landscape's slope under them, so last step's gradient is already out of date.
-
-Notice that the step moved `x` (the steep direction) more than `y` (the gentle one). Each input moves in proportion to its own slope.
+Notice that the step moved `x` (the steep direction) more than `y` (the gentle one). Each input moves in proportion to its own slope. Section 3.3 keeps walking from here.
 
 #### From 2 knobs to 34 million
 
@@ -461,6 +442,31 @@ If the guess is 6 and the answer is 10: `loss = (6 − 10)² = 16`.
 
 > 🧒 **ELI5:** For each number in the model, we work out: should it go up or down to make the error smaller? Then we move it a small step in that direction. The learning rate is how big that step is. Too small and learning is slow. Too big and the numbers overshoot and the error gets worse.
 
+#### How the loss is tied to the knobs
+
+The loss never looks at the knobs. It only looks at the guess. But the guess is made from the knobs, so changing a knob changes the guess, and that changes the loss:
+
+```
+knob  →  guess  →  loss
+```
+
+With the one-knob model from 3.1 (`guess = w × 2`, correct answer 10):
+
+| w (the knob) | guess = w × 2 | loss = (guess − 10)² |
+|---|---|---|
+| 3 | 6 | 16 |
+| 4 | 8 | 4 |
+| 5 | 10 | 0 |
+
+So the loss depends on `w`, just one step removed. The question training asks about each knob is: **if I turn this knob up a tiny bit, does the loss go up or down, and by how much?** That number is the knob's gradient.
+- Negative: turning the knob up lowers the loss, so turn it up.
+- Positive: turning the knob up raises the loss, so turn it down.
+- Close to zero: this knob barely matters right now, so leave it mostly alone.
+
+Two things that aren't obvious:
+- **The answer changes as you go.** At `w = 3`, turning `w` up helps a lot. At `w = 5`, it doesn't help at all. So you have to ask again after every step (more on this below).
+- **Every knob gets its own answer, all at once.** In the real model the chain is longer (`34 million knobs → many layers → a score for every possible next token → loss`), but each knob still affects the loss only by passing through the steps after it. Backpropagation (Chapter 14) works out all 34 million answers in one backward sweep, instead of nudging each knob one at a time.
+
 Picture the loss as a **landscape**. Every possible knob setting is a location, and the loss is the height. Training = **getting to the lowest valley**.
 
 You're blindfolded. You can't see the valley, but you *can* feel the slope under your feet. That slope is the **gradient**. So:
@@ -474,6 +480,27 @@ As an update rule:
 knob = knob − learning_rate × gradient
 ```
 The **minus** sign is what makes you go *down*hill. The **learning rate (LR)** is your step size.
+
+Back to the bowl `height = x² + y²` from Section 2.5: one step from `(3, 1)` with learning rate 0.1 landed at `(2.4, 0.8)`.
+
+**Important: recompute the gradient at every new position.** The gradient `[6, 2]` was the slope at `(3, 1)` only. The ground has a different tilt at `(2.4, 0.8)`, so the next step uses the gradient *there*: `[2 × 2.4, 2 × 0.8] = [4.8, 1.6]`. Reusing `[6, 2]` would be walking on an old map: it would keep pushing in the same direction at the same strength, and could carry you straight past the bottom of the bowl.
+
+So each step is: **measure the slope where you're standing, step, measure again.**
+
+| Step | Position (x, y) | Gradient here `[2x, 2y]` | Height `x² + y²` |
+|---|---|---|---|
+| 0 | (3, 1) | [6, 2] | 10 |
+| 1 | (2.4, 0.8) | [4.8, 1.6] | 6.4 |
+| 2 | (1.92, 0.64) | [3.84, 1.28] | 4.096 |
+| 3 | (1.536, 0.512) | [3.072, 1.024] | 2.621 |
+| 4 | (1.229, 0.410) | [2.458, 0.819] | 1.678 |
+| 5 | (0.983, 0.328) | [1.966, 0.655] | 1.074 |
+
+Each row's position is the row above minus 0.1 × the row above's gradient. Two things to notice:
+- **The gradient shrinks as you approach the bottom**, because the bowl flattens out. So the steps get smaller on their own, even though the learning rate stays at 0.1.
+- At the very bottom, `(0, 0)`, the gradient is `[0, 0]`: flat ground, nowhere downhill to go, so the steps stop.
+
+Repeat this and you slide toward the bottom of the bowl at `(0, 0)`. In training, this is why the model has to run a fresh forward and backward pass every step: changing the knobs changes the landscape's slope under them, so last step's gradient is already out of date.
 
 ### 3.4 Worked example: one knob, full loop
 
@@ -1346,6 +1373,8 @@ The order below is the order the backward pass runs, **from the loss back to the
 dz = p − onehot(target)
 ```
 where `onehot(target)` is a vector of zeros with a 1 at the correct token.
+
+**Why work out a slope for every token's score?** The model gives every possible next token a score, and the loss is calculated straight from those scores. So the scores are the first thing we can ask about: "if this score went up a little, would the loss go up or down?" We don't change the scores directly; they aren't knobs. But every knob reaches the loss only by changing these scores (`knob → … → scores → loss`, see 3.3), so `dz` is where the backward pass starts before working back to the knobs. Every token gets a slope, not just the correct one, because the probabilities have to add up to 1: a wrong token with a high score takes probability away from the right one, so the wrong scores affect the loss too.
 
 **Worked example:** `z = [2.0, 1.0, 0.1]`, `p = [0.659, 0.242, 0.099]`, target = 0:
 ```
