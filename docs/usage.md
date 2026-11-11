@@ -152,7 +152,7 @@ $env:DANIELLM_LIBRARY = 'E:\wiki-llm\library.sqlite'; python dashboard.py
 ```
 It rebuilds the article text from the prepared token files, so no new download is needed. One library can hold articles from several datasets. Search results are passages from the saved articles; nothing is generated.
 
-**Chat with lookup:** with "Look it up in the library" ticked, the dashboard searches the library for your question. From each top article it picks the paragraph sharing the most words with the question, and it puts up to three passages in front of the question. The reply lists the articles used. Only a model trained on passage + question examples (`dialogue-rag`, below) knows to answer from them.
+**Chat with lookup:** with "Look it up in the library" ticked, the dashboard searches the library for your question. From each top article it picks the paragraph sharing the most words with the question. The best article also contributes its opening paragraph, where Wikipedia states the key facts. Up to three passages go in front of the question. The reply lists the articles used. Only a model trained on passage + question examples (`dialogue-rag`, below) knows to answer from them.
 
 ## Dialogue stage (after pretraining)
 
@@ -165,6 +165,10 @@ python train_dialogue.py --resume --steps 1000
 ```powershell
 $env:HF_HOME = 'E:\wiki-llm\hf-cache'
 python prepare_dialogue.py --tokenizer E:/wiki-llm/data/full/tokenizer.json --out E:/wiki-llm/data/dialogue-rag --examples 10000 --rag-examples 30000 --context 1024
+```
+With SQuAD's own third of unanswerable questions, the 98M model learned to refuse too often (it said "the passages don't say" for 55% of questions it could answer). `--rag-unanswerable 0.2` caps their share in the training split. The validation split keeps SQuAD's own mix, so scores stay comparable:
+```powershell
+python prepare_dialogue.py --tokenizer E:/wiki-llm/data/full/tokenizer.json --out E:/wiki-llm/data/dialogue-rag-v2 --examples 10000 --rag-examples 60000 --rag-val 1000 --rag-unanswerable 0.2 --context 1024
 ```
 
 **Measure lookup answers** (CPU by default; add `--device cuda` only when nothing is training):

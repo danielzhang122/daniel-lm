@@ -79,7 +79,7 @@ def encode(tok, messages, context):
     return ids, labels
 
 
-def prepare(tokenizer, out, examples, context, rag_examples=0, rag_val=0):
+def prepare(tokenizer, out, examples, context, rag_examples=0, rag_val=0, unanswerable_share=None):
     if out.exists() and any(out.iterdir()):
         raise ValueError('Use an empty output directory')
     out.mkdir(parents=True,exist_ok=True)
@@ -123,12 +123,18 @@ def prepare(tokenizer, out, examples, context, rag_examples=0, rag_val=0):
         shutil.copyfile(card,out/'SQUAD_DATASET_CARD.md')
         squad=load_dataset(SQUAD,revision=revision)
         rng=random.Random(42)
-        tally=counts['squad_v2']=dict(train=0,val=0,skipped=0,scanned=0)
+        tally=counts['squad_v2']=dict(train=0,val=0,skipped=0,scanned=0,unanswerable_train=0,unanswerable_val=0)
         # SQuAD's own validation articles become our val set, so no val article is ever trained on.
         for split,source,wanted in (('train','train',rag_examples),('val','validation',rag_val)):
             target=tally[split]+wanted
             for messages,extra in squad_conversations(squad[source],len(squad[source]),rng):
-                add(messages,extra,split,tally)
+                # Cap the share of "the passages don't say" answers in training only (val keeps SQuAD's
+                # own mix, so scores stay comparable); too many teach the model to refuse by default.
+                capped=split=='train' and unanswerable_share is not None
+                if capped and not extra['answerable'] and tally['unanswerable_train']>=unanswerable_share*(tally['train']+1):
+                    continue
+                if add(messages,extra,split,tally) and not extra['answerable']:
+                    tally['unanswerable_'+split]+=1
                 if tally[split]>=target: break
         sources.append(dict(dataset=SQUAD,revision=revision,source_url='https://huggingface.co/datasets/'+SQUAD,
                             declared_license='cc-by-sa-4.0 (share-alike: keep this license if you publish the prepared data)',
@@ -140,6 +146,7 @@ def prepare(tokenizer, out, examples, context, rag_examples=0, rag_val=0):
         with (out/(split+'.jsonl')).open('w',encoding='utf-8') as f:
             for r in rows: f.write(json.dumps(r,ensure_ascii=False)+'\n')
     meta=dict(sources=sources,context=context,format='plain-roles-eos-v1',rag_format='rag-passages-v1',counts=counts,
+              unanswerable_share=unanswerable_share,
               examples={s:len(r) for s,r in records.items()},
               files_sha256={s:hashlib.sha256((out/(s+'.jsonl')).read_bytes()).hexdigest() for s in ('train','val')},
               tokenizer_sha256=hashlib.sha256(tokenizer.read_bytes()).hexdigest())
@@ -154,9 +161,12 @@ if __name__=='__main__':
     p.add_argument('--examples',type=int,default=5000,help='General chat conversations (smol-smoltalk); 0 for none')
     p.add_argument('--rag-examples',type=int,default=0,help='Passage + question conversations from SQuAD 2.0 train')
     p.add_argument('--rag-val',type=int,help='SQuAD 2.0 validation conversations for the val set (default: rag-examples / 30, at least 100)')
+    p.add_argument('--rag-unanswerable',type=float,help='Highest share of unanswerable SQuAD questions in train (SQuAD has about 0.33)')
     p.add_argument('--context',type=int,default=512)
     a=p.parse_args()
     if a.rag_val is None: a.rag_val=max(100,a.rag_examples//30) if a.rag_examples else 0
     if a.examples<0 or a.rag_examples<0 or a.rag_val<0 or a.examples+a.rag_examples<100 or a.context<16:
         p.error('Use at least 100 examples in total and context 16')
-    prepare(a.tokenizer,a.out,a.examples,a.context,a.rag_examples,a.rag_val)
+    if a.rag_unanswerable is not None and not 0<=a.rag_unanswerable<=1:
+        p.error('--rag-unanswerable must be between 0 and 1')
+    prepare(a.tokenizer,a.out,a.examples,a.context,a.rag_examples,a.rag_val,a.rag_unanswerable)

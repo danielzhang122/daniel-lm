@@ -110,8 +110,16 @@ def passages(question, k=3, chars=700, path=DEFAULT_DB, seconds=1.5):
             wanted = _stems(' '.join(terms))
             best, _, text = max((len(wanted & _stems(p)) / len(wanted), -i, p) for i, p in enumerate(paragraphs))
             title_share = len(wanted & _stems(title)) / len(wanted)
-            scored.append((best + bonus + 0.5 * title_share, -aid, dict(id=aid, title=title, url=url, text=_clip(text, chars))))
-    return [s[2] for s in sorted(scored, key=lambda s: s[:2], reverse=True)[:k]]
+            lead = None if text == paragraphs[0] else dict(id=aid, title=title, url=url, text=_clip(paragraphs[0], chars))
+            scored.append((best + bonus + 0.5 * title_share, -aid, dict(id=aid, title=title, url=url, text=_clip(text, chars)), lead))
+    ranked = sorted(scored, key=lambda s: s[:2], reverse=True)
+    if not ranked:
+        return []
+    # The best article's opening paragraph also goes in: Wikipedia states the key facts there ("Pride and
+    # Prejudice is a novel by Jane Austen"), while word overlap can pick a later paragraph that merely
+    # repeats the question's words (a review that "wrote" about the novel).
+    found = [ranked[0][2]] + ([ranked[0][3]] if ranked[0][3] else []) + [s[2] for s in ranked[1:]]
+    return found[:k]
 
 
 def _clip(text, chars):

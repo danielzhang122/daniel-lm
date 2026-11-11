@@ -1,3 +1,5 @@
+import contextlib
+import io
 import hashlib
 import json
 from pathlib import Path
@@ -33,6 +35,35 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(labels[-1],tok.token_to_id('<eos>'))
         self.assertEqual(len(ids),len(labels))
         self.assertTrue(any(v!=-100 for v in labels))
+
+    def test_prepare_caps_unanswerable_share_in_train_only(self):
+        from unittest import mock
+        rows=lambda n,tag:[dict(id=f'{tag}{i}',title=f'T{i%5}',context=f'Passage {tag}{i}. Electricity runs through wires.',
+                                question=f'Question {tag}{i}?',answers=dict(text=[] if i%2 else ['wires'],answer_start=[]))
+                           for i in range(n)]  # half unanswerable
+        squad={'train':rows(200,'t'),'validation':rows(60,'v')}
+        with tempfile.TemporaryDirectory() as temp, \
+                mock.patch.object(prepare_dialogue,'HfApi') as api, \
+                mock.patch.object(prepare_dialogue,'hf_hub_download',return_value=str(Path(temp)/'card.md')), \
+                mock.patch.object(prepare_dialogue,'load_dataset',return_value=squad):
+            api.return_value.dataset_info.return_value.sha='abc'
+            (Path(temp)/'card.md').write_text('card')
+            tok=tokenizer();tok.save(str(Path(temp)/'tok.json'))
+            def run(name,share):
+                out=Path(temp)/name
+                with contextlib.redirect_stdout(io.StringIO()):
+                    prepare_dialogue.prepare(Path(temp)/'tok.json',out,0,10_000,rag_examples=60,rag_val=40,unanswerable_share=share)
+                meta=json.loads((out/'metadata.json').read_text())
+                return meta,[json.loads(l) for l in (out/'val.jsonl').read_text(encoding='utf-8').splitlines()]
+            meta,val=run('capped',0.2)
+            c=meta['counts']['squad_v2']
+            self.assertEqual((c['train'],c['val'],meta['unanswerable_share']),(60,40,0.2))
+            self.assertLessEqual(c['unanswerable_train'],0.2*60)
+            self.assertGreaterEqual(c['unanswerable_train'],0.2*60-1)
+            self.assertEqual(c['unanswerable_val'],sum(not r['answerable'] for r in val))
+            self.assertGreater(c['unanswerable_val'],10)  # val keeps the natural (here 50%) mix
+            meta,_=run('natural',None)
+            self.assertGreater(meta['counts']['squad_v2']['unanswerable_train'],20)
 
     def test_rag_examples_label_only_the_answer_and_keep_the_real_passage(self):
         tok=tokenizer()
@@ -107,7 +138,7 @@ class ToolTests(unittest.TestCase):
         para='Electricity runs through copper wires in houses and is measured in watts by the meter.'
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);db=root/'library.sqlite'
-            first=dataset(root,'a',[(dict(id='1',title='Wires',url='u1'),'Intro text that is long enough to count as a paragraph here.\n\n'+para)],{'n':1})
+            first=dataset(root,'a',[(dict(id='1',title='Wires',url='u1'),'Intro text that is long enough to count as a paragraph here, describing the subject in general terms.\n\n'+para)],{'n':1})
             second=dataset(root,'b',[(dict(id='2',title='Electricity',url='u2'),'Electricity is the flow of charge through wires, and it powers lights in every house.')],{'n':2})
             library.build(first,db,0);library.build(second,db,0)
             st=library.status(db);self.assertEqual((st['articles'],st['complete'],st['datasets']),(2,True,2))
@@ -117,6 +148,9 @@ class ToolTests(unittest.TestCase):
             best=library.passages('copper wires meter',k=1,path=db)
             self.assertEqual(best[0]['title'],'Wires')
             self.assertIn('copper',best[0]['text'])
+            both=library.passages('copper wires meter',k=3,path=db)  # best paragraph, then the top article's opening one
+            self.assertEqual([(p['title'],p['text'][:5]) for p in both[:2]],[('Wires','Elect'),('Wires','Intro')])
+            self.assertEqual(len(library.passages('copper wires meter',k=1,path=db)),1)
             self.assertEqual(library.passages('the of and',path=db),[])
             overlap=dataset(root,'c',[(dict(id='1',title='Wires',url='u1'),'Duplicate article text that should be refused.')],{'n':3})
             with self.assertRaisesRegex(ValueError,'already in the library'): library.build(overlap,db,0)
