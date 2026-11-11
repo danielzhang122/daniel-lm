@@ -33,6 +33,9 @@ SYMBOLS = {'nbsp': ' ', 'snd': ' – ', 'spaced ndash': ' – ', 'ndash': '–',
            '\'': "'", '\'"': '\'"', 'thinsp': ' ', '=': '=', '!': '|', 'pi': 'π', 'deg': '°', 'degree': '°'}
 DATE_TEMPLATES = {'start date', 'end date', 'birth date', 'death date', 'start date and age', 'birth date and age',
                   'death date and age', 'dts', 'date', 'film date', 'released'}
+# Every template name _template_text can turn into text (plus "lang-xx"); all others are dropped unread.
+KEPT_TEMPLATES = (set(SYMBOLS) | KEEP_FIRST | KEEP_LAST | DATE_TEMPLATES |
+                  {'convert', 'cvt', 'val', 'frac', 'fraction', 'sfrac', 'circa', 'c.', 'as of', 'us$', 'usd'})
 
 
 def _template_text(template):
@@ -82,26 +85,7 @@ def wikitext_to_text(wikitext):
     templates (measurements, dates, foreign-language words) kept as text; headings kept as lines."""
     import mwparserfromhell
     code = mwparserfromhell.parse(wikitext)
-    # Inner templates first (ifilter lists outer before inner, so reverse it): in {{nowrap|{{convert|5|m}}}}
-    # the convert becomes "5 m" before nowrap keeps its first parameter; doing nowrap first would lose it.
-    for node in reversed(list(code.ifilter_templates(recursive=True))):
-        try:
-            text = _template_text(node)
-        except (ValueError, IndexError):
-            text = None
-        if text is None:
-            _remove(code, node)
-        else:
-            try:
-                code.replace(node, text)
-            except ValueError:
-                pass
-    for node in list(code.ifilter_tags(recursive=True)):
-        if str(node.tag).strip().lower() in DROP_TAGS or str(node.tag).strip().lower() == 'table':
-            _remove(code, node)
-    for node in list(code.ifilter_wikilinks(recursive=True)):
-        if str(node.title).strip().lower().startswith(DROP_LINKS):
-            _remove(code, node)
+    _clean_nodes(code, mwparserfromhell.parse)
     text = code.strip_code(normalize=True, collapse=True)
     text = re.sub(r'\{\|.*?\|\}', '', text, flags=re.S)           # leftover wiki tables
     text = re.sub(r"'{2,}", '', text)                                 # bold/italic quotes
@@ -116,20 +100,59 @@ def wikitext_to_text(wikitext):
     return text.strip()
 
 
-def _remove(code, node):
-    try:
-        code.remove(node)
-    except ValueError:
-        pass  # already removed with its parent
+def _clean_nodes(code, parse):
+    """One pass over the parse tree, rebuilding each node list in place: dropped templates, tags and file
+    links are skipped without looking inside; kept templates have their insides cleaned first, so in
+    {{nowrap|{{convert|5|m}}}} the convert becomes "5 m" before nowrap keeps its first parameter.
+    (Calling code.replace/remove per node instead searched the whole page each time: 1.5 s per big article.)"""
+    from mwparserfromhell.nodes import Tag, Template, Wikilink
+    kept = []
+    for node in code.nodes:
+        if isinstance(node, Template):
+            low = str(node.name).strip().replace('_', ' ').lower()
+            if low not in KEPT_TEMPLATES and not low.startswith('lang-'):
+                continue
+            for child in node.__children__():
+                _clean_nodes(child, parse)
+            try:
+                text = _template_text(node)
+            except (ValueError, IndexError):
+                text = None
+            if text:
+                kept.extend(parse(text).nodes)
+            continue
+        if isinstance(node, Tag) and str(node.tag).strip().lower() in DROP_TAGS | {'table'}:
+            continue
+        if isinstance(node, Wikilink) and str(node.title).strip().lower().startswith(DROP_LINKS):
+            continue
+        for child in node.__children__():
+            _clean_nodes(child, parse)
+        kept.append(node)
+    code.nodes = kept
+
+
+_worker = {}
+
+
+def _init_worker(tokenizer_path, min_chars):
+    from tokenizers import Tokenizer
+    tok = Tokenizer.from_file(str(tokenizer_path))
+    _worker.update(tok=tok, eos=tok.token_to_id('<eos>'), min_chars=min_chars)
 
 
 def convert(page):
+    """Clean and tokenize one page in a worker process (tokenizing in the main process made it the
+    bottleneck). Returns None for a malformed or too-short page."""
     page_id, title, wikitext = page
     try:
         text = clean_article(wikitext_to_text(wikitext))
     except Exception:  # a malformed page should not stop a 7M-page run
         return None
-    return dict(id=page_id, url='https://en.wikipedia.org/wiki/' + quote(title), title=title, text=text)
+    if len(text) < _worker['min_chars']:
+        return None
+    ids = _worker['tok'].encode(title + '\n\n' + text).ids + [_worker['eos']]
+    return dict(id=page_id, url='https://en.wikipedia.org/wiki/' + quote(title), title=title,
+                ids=np.asarray(ids, dtype='<u2').tobytes())
 
 
 def pages(dump, skip):
@@ -174,23 +197,22 @@ def main():
     from tokenizers import Tokenizer
     (a.out / 'tokenizer.json').write_bytes(a.tokenizer.read_bytes())  # byte-identical for transfer checks
     tok = Tokenizer.from_file(str(a.out / 'tokenizer.json'))
-    eos = tok.token_to_id('<eos>')
     skip = set()
     if a.skip_ids:
         with a.skip_ids.open('rb') as f:
             skip = {json.loads(line)['id'] for line in f}
         print(f'Leaving out {len(skip):,} articles already in {a.skip_ids}', flush=True)
     counts, articles, short = {'train': 0, 'val': 0}, {'train': 0, 'val': 0}, 0
-    with Pool(a.workers) as pool, (a.out / 'train.bin').open('wb') as train, \
-            (a.out / 'val.bin').open('wb') as val, (a.out / 'sources.jsonl').open('w', encoding='utf-8') as sources:
+    with Pool(a.workers, initializer=_init_worker, initargs=(a.out / 'tokenizer.json', a.min_chars)) as pool, \
+            (a.out / 'train.bin').open('wb') as train, (a.out / 'val.bin').open('wb') as val, \
+            (a.out / 'sources.jsonl').open('w', encoding='utf-8') as sources:
         for done, art in enumerate(pool.imap(convert, pages(a.dump, skip), chunksize=16), 1):
-            if art is None or len(art['text']) < a.min_chars:
+            if art is None:
                 short += 1
             else:
                 split = 'val' if validation(art['id']) else 'train'
-                ids = tok.encode(art['title'] + '\n\n' + art['text']).ids + [eos]
-                np.asarray(ids, dtype='<u2').tofile(val if split == 'val' else train)
-                counts[split] += len(ids)
+                (val if split == 'val' else train).write(art['ids'])
+                counts[split] += len(art['ids']) // 2
                 articles[split] += 1
                 sources.write(json.dumps({k: art[k] for k in ('id', 'url', 'title')}, ensure_ascii=False) + '\n')
             if done % 10000 == 0:
