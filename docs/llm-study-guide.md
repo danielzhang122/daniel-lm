@@ -489,6 +489,15 @@ So the loss depends on `w`, just one step removed. The question training asks ab
 - the gradient is one slope per knob, lined up in a list
 
 So the loss is 1 number, but the gradient has as many entries as there are knobs: 2 in the bowl from Section 2.5 (height `x² + y²` is one number, its gradient `[2x, 2y]` has two), and about 34 million in the real model. It has exactly the same shape as the knobs, and each slope sits in the same place as the knob it belongs to, which is how the update below knows which slope goes with which knob. The gradient is also different at every knob setting, so "the gradient" always means "the gradient at the knobs' current values".
+
+**Each knob is one dimension.** Write all the knobs in one long list and that list is a vector: `[a, b]` has 2 dimensions, the real model's knobs have about 34 million. The gradient is a vector with the same dimensions, in the same order: `[slope for a, slope for b]`. So knob number 7 and slope number 7 always belong together, and the update goes down both lists one position at a time:
+```
+new a = a − learning_rate × (slope for a)
+new b = b − learning_rate × (slope for b)
+```
+This is also what "a landscape with 34 million directions" (Section 2.5) means: each knob is one direction you can move in, and its slope says how steep the ground is in that direction.
+
+In the code the knobs aren't stored as one long list. They're kept as many separate matrices (the embedding table, each Linear layer's weights, and so on), and each has a gradient matrix of the same shape (Chapter 15's rule "`dX` has the same shape as `X`"). Laid end to end, those matrices are the one long vector.
 - Negative: turning the knob up lowers the loss, so turn it up.
 - Positive: turning the knob up raises the loss, so turn it down.
 - Close to zero: this knob barely matters right now, so leave it mostly alone.
