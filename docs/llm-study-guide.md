@@ -481,7 +481,14 @@ With the one-knob model from 3.1 (`guess = w × 2`, correct answer 10):
 | 4 | 8 | 4 |
 | 5 | 10 | 0 |
 
-So the loss depends on `w`, just one step removed. The question training asks about each knob is: **if I turn this knob up a tiny bit, does the loss go up or down, and by how much?** That number is the knob's gradient.
+So the loss depends on `w`, just one step removed. The question training asks about each knob is: **if I turn this knob up a tiny bit, does the loss go up or down, and by how much?** That number is the knob's **slope** (its partial derivative: its slope with every other knob held still).
+
+**What is the gradient *of*?** The loss is one number, so this can sound odd. The gradient doesn't describe the loss by itself; it describes how the loss **responds to each knob**. Its full name is "the gradient of the loss with respect to the knobs":
+- the loss is the output: 1 number
+- the knobs are the inputs: many numbers
+- the gradient is one slope per knob, lined up in a list
+
+So the loss is 1 number, but the gradient has as many entries as there are knobs: 2 in the bowl from Section 2.5 (height `x² + y²` is one number, its gradient `[2x, 2y]` has two), and about 34 million in the real model. It has exactly the same shape as the knobs, and each slope sits in the same place as the knob it belongs to, which is how the update below knows which slope goes with which knob. The gradient is also different at every knob setting, so "the gradient" always means "the gradient at the knobs' current values".
 - Negative: turning the knob up lowers the loss, so turn it up.
 - Positive: turning the knob up raises the loss, so turn it down.
 - Close to zero: this knob barely matters right now, so leave it mostly alone.
