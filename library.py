@@ -58,8 +58,10 @@ def passages(question, k=3, chars=700, path=DEFAULT_DB, seconds=1.5):
     Candidates: articles whose title exactly equals a phrase from the question, plus
     full-text hits. Each candidate is scored by its best paragraph's share of question
     words, with a bonus for an exact title match (plain BM25 favours tiny articles).
-    Ties go to the earlier paragraph (the opening one is usually the summary). Each
-    search stage stops after about `seconds`, keeping what it found by then.
+    Ties go to the earlier paragraph (the opening one is usually the summary). The top
+    article's opening paragraph is added too. If the top article's title is a phrase of two or
+    more words from the question, only that article's paragraphs are returned. Each search stage stops
+    after about `seconds`, keeping what it found by then.
     """
     terms = list(dict.fromkeys(_terms(question)))[:8]
     if not terms or not Path(path).exists():
@@ -111,14 +113,20 @@ def passages(question, k=3, chars=700, path=DEFAULT_DB, seconds=1.5):
             best, _, text = max((len(wanted & _stems(p)) / len(wanted), -i, p) for i, p in enumerate(paragraphs))
             title_share = len(wanted & _stems(title)) / len(wanted)
             lead = None if text == paragraphs[0] else dict(id=aid, title=title, url=url, text=_clip(paragraphs[0], chars))
-            scored.append((best + bonus + 0.5 * title_share, -aid, dict(id=aid, title=title, url=url, text=_clip(text, chars)), lead))
+            scored.append((best + bonus + 0.5 * title_share, -aid, dict(id=aid, title=title, url=url, text=_clip(text, chars)), lead, bonus >= 1.0))
     ranked = sorted(scored, key=lambda s: s[:2], reverse=True)
     if not ranked:
         return []
     # The best article's opening paragraph also goes in: Wikipedia states the key facts there ("Pride and
     # Prejudice is a novel by Jane Austen"), while word overlap can pick a later paragraph that merely
     # repeats the question's words (a review that "wrote" about the novel).
-    found = [ranked[0][2]] + ([ranked[0][3]] if ranked[0][3] else []) + [s[2] for s in ranked[1:]]
+    found = [ranked[0][2]] + ([ranked[0][3]] if ranked[0][3] else [])
+    # When the question names the top article in two or more words ("How tall is Mount Everest?"), other
+    # articles are only distractors: the model tends to copy a number from them (a different peak's 8201 m).
+    # One-word titles don't count: "Iraq" in "the war between Iran and Iraq" isn't the whole topic.
+    # Filling the free places with its next-best paragraphs was tried: more wrong answers, fewer "don't say".
+    if not ranked[0][4]:
+        found += [s[2] for s in ranked[1:]]
     return found[:k]
 
 

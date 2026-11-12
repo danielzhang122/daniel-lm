@@ -138,21 +138,25 @@ class ToolTests(unittest.TestCase):
         para='Electricity runs through copper wires in houses and is measured in watts by the meter.'
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);db=root/'library.sqlite'
-            first=dataset(root,'a',[(dict(id='1',title='Wires',url='u1'),'Intro text that is long enough to count as a paragraph here, describing the subject in general terms.\n\n'+para)],{'n':1})
-            second=dataset(root,'b',[(dict(id='2',title='Electricity',url='u2'),'Electricity is the flow of charge through wires, and it powers lights in every house.')],{'n':2})
+            first=dataset(root,'a',[(dict(id='1',title='Copper wires',url='u1'),'Intro text that is long enough to count as a paragraph here, describing the subject in general terms.\n\n'+para)],{'n':1})
+            second=dataset(root,'b',[(dict(id='2',title='Electricity',url='u2'),'Electricity is the flow of charge through wires, and it powers lights in every house.\n\nIn 1752 Benjamin Franklin flew a kite in a storm to show that lightning is a form of electricity.')],{'n':2})
             library.build(first,db,0);library.build(second,db,0)
             st=library.status(db);self.assertEqual((st['articles'],st['complete'],st['datasets']),(2,True,2))
             library.build(second,db,0);self.assertEqual(library.status(db)['articles'],2)  # resuming adds nothing
             hits=library.passages('What is electricity?',k=2,path=db)
             self.assertEqual(hits[0]['title'],'Electricity')  # exact title match ranks first
+            self.assertEqual([p['title'] for p in hits],['Electricity','Copper wires'])  # a one-word title keeps other articles
+            mixed=library.passages('flow of charge through copper',k=3,path=db)  # no title named: several articles
+            self.assertEqual({p['title'] for p in mixed},{'Copper wires','Electricity'})
             best=library.passages('copper wires meter',k=1,path=db)
-            self.assertEqual(best[0]['title'],'Wires')
+            self.assertEqual(best[0]['title'],'Copper wires')
             self.assertIn('copper',best[0]['text'])
             both=library.passages('copper wires meter',k=3,path=db)  # best paragraph, then the top article's opening one
-            self.assertEqual([(p['title'],p['text'][:5]) for p in both[:2]],[('Wires','Elect'),('Wires','Intro')])
+            # "copper wires" names the article in two words, so Electricity (which mentions wires) is left out
+            self.assertEqual([(p['title'],p['text'][:5]) for p in both],[('Copper wires','Elect'),('Copper wires','Intro')])
             self.assertEqual(len(library.passages('copper wires meter',k=1,path=db)),1)
             self.assertEqual(library.passages('the of and',path=db),[])
-            overlap=dataset(root,'c',[(dict(id='1',title='Wires',url='u1'),'Duplicate article text that should be refused.')],{'n':3})
+            overlap=dataset(root,'c',[(dict(id='1',title='Copper wires',url='u1'),'Duplicate article text that should be refused.')],{'n':3})
             with self.assertRaisesRegex(ValueError,'already in the library'): library.build(overlap,db,0)
 
     def test_wikitext_to_text_keeps_prose_and_drops_markup(self):

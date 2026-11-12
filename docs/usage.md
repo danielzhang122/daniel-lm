@@ -13,7 +13,7 @@ Full reference for running daniellm. The [README](../README.md) has the short ve
 | FineWeb-Edu + those articles, combined | `E:\wiki-llm\data\fineweb-wiki` (3.76B train tokens), for the stage after `runs/big` |
 | Dialogue training | Pipeline tested; lookup-style data (`dialogue-rag`) prepared; run it after pretraining finishes |
 | Dashboard (charts, try the model, model explorer) | Working |
-| Offline library search | Full index at `E:\wiki-llm\library.sqlite` (the 2023 snapshot plus the articles it lacked); `data/library.sqlite` is the 10,000-article starter |
+| Offline library search | Full index at `E:\wiki-llm\library-2026.sqlite` (6.5M articles from the 7 Nov 2026 dump, 38 GB). The older `E:\wiki-llm\library.sqlite` mixes the 2023 snapshot with the articles it lacked. `data/library.sqlite` is the 10,000-article starter |
 | Chat that looks things up | Library passages go into the prompt ("Look it up in the library" on the Chat page); needs a model trained on `dialogue-rag` |
 | Portable export for the Dell | Exported and tested locally; Linux install on the Dell not yet tested |
 
@@ -95,7 +95,7 @@ python prepare_fineweb.py --tokenizer E:/wiki-llm/data/full/tokenizer.json --out
 ```powershell
 python prepare_wikidump.py --dump E:\wiki-llm\dump\enwiki-20261107-pages-articles-multistream.xml.bz2 --tokenizer E:/wiki-llm/data/full/tokenizer.json --skip-ids E:\wiki-llm\data\full\sources.jsonl --out E:/wiki-llm/data/wiki-missing
 ```
-`--skip-ids` leaves out every article already in that dataset. Templates that carry article content (measurements such as `{{convert|330|m}}`, dates, foreign-language words) are kept as text ("330 m"). Infoboxes, references and tables are dropped.
+`--skip-ids` leaves out every article already in that dataset. Without it, the whole dump is converted: `--out E:/wiki-llm/data/wiki-2026` took about 3 hours with `--workers 12` and gave 6.43M articles and 5.5B tokens. Templates that carry article content (measurements such as `{{convert|330|m}}`, dates, foreign-language words) are kept as text ("330 m"). Infoboxes, references and tables are dropped. Numbers computed when Wikipedia shows the page (for example Australia's population, `{{#expr:{{Data Australia|poptoday}} ...}}`) come from separate data pages that the conversion doesn't read, so they are missing from the text.
 
 **Combine datasets** (they must share a tokenizer; the trainer shuffles blocks, so the order doesn't matter):
 ```powershell
@@ -148,11 +148,12 @@ This generates text from fixed prompts and saves it to `data/samples.sqlite`, so
 python library.py --articles 100000                                  # grow the index (resumable)
 python library.py --db E:\wiki-llm\library.sqlite --articles 0       # full index
 python library.py --data E:/wiki-llm/data/wiki-missing --db E:\wiki-llm\library.sqlite --articles 0   # add the dump articles
-$env:DANIELLM_LIBRARY = 'E:\wiki-llm\library.sqlite'; python dashboard.py
+python library.py --data E:/wiki-llm/data/wiki-2026 --db E:\wiki-llm\library-2026.sqlite --articles 0   # whole 2026 dump (about 1h50m)
+$env:DANIELLM_LIBRARY = 'E:\wiki-llm\library-2026.sqlite'; python dashboard.py
 ```
 It rebuilds the article text from the prepared token files, so no new download is needed. One library can hold articles from several datasets. Search results are passages from the saved articles; nothing is generated.
 
-**Chat with lookup:** with "Look it up in the library" ticked, the dashboard searches the library for your question. From each top article it picks the paragraph sharing the most words with the question. The best article also contributes its opening paragraph, where Wikipedia states the key facts. Up to three passages go in front of the question. The reply lists the articles used. Only a model trained on passage + question examples (`dialogue-rag`, below) knows to answer from them.
+**Chat with lookup:** with "Look it up in the library" ticked, the dashboard searches the library for your question. From each top article it picks the paragraph sharing the most words with the question. The best article also contributes its opening paragraph, where Wikipedia states the key facts. If the best article's title is a phrase of two or more words from the question ("How tall is **Mount Everest**?"), only that article's paragraphs are used. Passages from other articles only distract the model: given a mountaineer's article as well, it answered with another peak's 8201 m instead of Everest's 8,848.86 m. Up to three passages go in front of the question. The reply lists the articles used. Only a model trained on passage + question examples (`dialogue-rag`, below) knows to answer from them.
 
 ## Dialogue stage (after pretraining)
 
