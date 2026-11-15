@@ -1015,6 +1015,18 @@ x = token_embedding[id] + position_embedding[position]
 
 > 💡 **Key idea:** Embedding = table lookup. Each token gets a learned "meaning vector", plus a learned "position vector".
 
+#### Why 1,024 positions?
+
+The position table has one row per position, so its row count is the **context length** (`t`): the most tokens the model can look at at once. 1,024 is not forced by any rule of math. It's a **setting you choose** (`--context 1024` in `train.py`), and it's a trade-off:
+
+- **Longer context = the model can use more text.** At 1,024 tokens it can read roughly a few paragraphs (a token is about three-quarters of a word) and use all of it to predict the next token. Anything older than 1,024 tokens is forgotten. Too short a context means the model can't even see the whole article intro it's continuing.
+- **But attention cost grows with the *square* of the context.** Every token is scored against every earlier token, so the attention grid is `t × t` per head (Section 11.5). Doubling the context from 512 to 1,024 makes that grid **4× bigger** (512 × 512 = 262,144 scores vs 1,024 × 1,024 = 1,048,576), per head, per layer, per chunk. That means more GPU memory and slower training, and this project trains on a single 12 GB graphics card.
+- **The position table itself is cheap.** 1,024 × 768 = 786,432 knobs, under 1% of the model's ~98 million. Most of the cost of a longer context is the attention grid, not the table.
+- **Why this value and not 1,000?** Context lengths are almost always powers of two (512, 1,024, 2,048, ...), because GPUs handle those sizes efficiently. 1,024 is also the context length the well-known GPT-2 model used.
+- **The model can only use positions it has a row for.** Row 1,023 is the last one. Position 1,024 would have no row, so the model can't be fed more than 1,024 tokens at once. That's why `generate.py` keeps only the **last** 1,024 tokens when text gets longer (Section 18.3).
+
+The repo doesn't record the exact reason 1,024 was picked; the points above are the usual trade-offs behind a choice like it. If you changed `--context`, the position table would change size to match (it has `context` rows).
+
 > **Q: How many knobs are in the token embedding table? In the position table?**
 >
 > A: Token table: `16,384 × 768 = 12,582,912`. Position table: `1,024 × 768 = 786,432`.
