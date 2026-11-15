@@ -246,7 +246,7 @@ So W turned a size-2 vector into a size-3 vector. In PyTorch this is written `y 
 - A **matrix** is a table of numbers (rows and columns).
 - A **tensor** is the general word for any of these, including stacks of tables with even more layers.
 
-A token's 512-number vector isn't an arrow pointing somewhere. It's just 512 numbers in a row, each one describing something about the token.
+A token's 768-number vector isn't an arrow pointing somewhere. It's just 768 numbers in a row, each one describing something about the token.
 
 #### What the shape tells you
 
@@ -291,95 +291,94 @@ To read one value, you give one position per dimension, counting from 0. In the 
 | Dimensions | Example shape | What it holds | How to read the shape |
 |---|---|---|---|
 | 0 | `()` | the loss, like `3.21` | one number |
-| 1 | `(512,)` | one token's vector | 512 numbers |
-| 2 | `(16384, 512)` | the whole token table | 16,384 tokens, 512 numbers each |
-| 3 | `(2, 512, 512)` | a batch of text going through the model | 2 chunks of text, 512 tokens each, 512 numbers per token |
-| 4 | `(2, 8, 512, 512)` | attention scores | 2 chunks, 8 heads, and for each of 512 tokens, a score for each of 512 tokens |
+| 1 | `(768,)` | one token's vector | 768 numbers |
+| 2 | `(16384, 768)` | the whole token table | 16,384 tokens, 768 numbers each |
+| 3 | `(2, 1024, 768)` | a batch of text going through the model | 2 chunks of text, 1,024 tokens each, 768 numbers per token |
+| 4 | `(2, 12, 1024, 1024)` | attention scores | 2 chunks, 12 heads, and for each of 1,024 tokens, a score for each of 1,024 tokens |
 
-Check the token table: `16,384 × 512 = 8,388,608` numbers. That's one shape, and you already know how big it is.
+The shapes above use the settings of the bigger `big` run (width 768, context 1,024, 12 heads), so that no two letters share the same value. The original 34M model used 512 for both width and context, which made them easy to mix up. Check the token table: `16,384 × 768 = 12,582,912` numbers. That's one shape, and you already know how big it is.
 
 **Shape letters used in this guide (and in `model.py`):**
 
-| Letter | Meaning | Value in this project |
+| Letter | Meaning | Value (`big` run) |
 |---|---|---|
 | `b` | **batch**: how many text chunks processed at once | 2 |
-| `t` | **time**: how many tokens per chunk (position in the sentence) | up to 512 |
-| `c` | **channels**: the vector width per token | 512 |
-| `h` | **heads**: parallel attention units | 8 |
+| `t` | **time**: how many tokens per chunk (position in the sentence) | up to 1,024 |
+| `c` | **channels**: the vector width per token | 768 |
+| `h` | **heads**: parallel attention units | 12 |
 | `d` | per-head width = `c / h` | 64 |
 | `V` | **vocabulary** size: how many different tokens exist | 16,384 |
 
 #### What is a chunk?
 
-A **chunk** is one fixed-length slice of the training text: a run of up to 512 consecutive tokens (`t`) that the model reads as a single unit.
+A **chunk** is one fixed-length slice of the training text: a run of up to 1,024 consecutive tokens (`t`) that the model reads as a single unit.
 
-The model can only look at 512 tokens at a time, but a book or a Wikipedia dump is millions of tokens. So the text is tokenized into one long stream of token ids, then cut into pieces of at most 512 tokens. Each piece is a chunk.
+The model can only look at 1,024 tokens at a time, but a book or a Wikipedia dump is millions of tokens. So the text is tokenized into one long stream of token ids, then cut into pieces of at most 1,024 tokens. Each piece is a chunk.
 
 ```
-tokens:  [ 17, 903, 4, 55, 2210, ... 2,000 ids ... ]
+tokens:  [ 17, 903, 4, 55, 2210, ... 3,000 ids ... ]
 
-chunk 0: tokens    0 – 511
-chunk 1: tokens  512 – 1023
-chunk 2: tokens 1024 – 1535
-chunk 3: tokens 1536 – 1999   (shorter, 464 tokens)
+chunk 0: tokens    0 – 1023
+chunk 1: tokens 1024 – 2047
+chunk 2: tokens 2048 – 2999   (shorter, 952 tokens)
 ```
 
 - A chunk is **not** a sentence or paragraph. It can start or end mid-sentence, because the cut is by token count, not by meaning.
-- The batch size `b = 2` means each training step takes 2 chunks and processes them in parallel. They are independent: tokens in one chunk never attend to tokens in another. The input shape `(b, t)` reads "2 chunks, 512 token ids each."
-- At every position in a chunk the model predicts the next token, so one 512-token chunk gives 512 prediction exercises at once. Position 40 can only see tokens 0 to 40, never later ones.
+- The batch size `b = 2` means each training step takes 2 chunks and processes them in parallel. They are independent: tokens in one chunk never attend to tokens in another. The input shape `(b, t)` reads "2 chunks, 1,024 token ids each."
+- At every position in a chunk the model predicts the next token, so one 1,024-token chunk gives 1,024 prediction exercises at once. Position 40 can only see tokens 0 to 40, never later ones.
 
 #### What each letter really means
 
 - **`b` (batch).** The GPU is much faster doing 2 chunks at once than 1 chunk twice, so training feeds several independent chunks of text together. They never talk to each other; `b` is just "how many parallel copies of the same work." Here `b = 2` because memory is limited. A bigger batch gives a smoother learning signal but costs more memory.
-- **`t` (time).** The position along a chunk, `0` for the first token, `1` for the second, and so on. It's called "time" because text is read in order, like a sequence over time. `512` is the **context length**: the most tokens the model can look at in one go. Shorter chunks are padded or cut so every chunk in a batch has the same `t`.
-- **`c` (channels).** The length of the vector that represents one token. Each token starts as a row of 512 numbers (looked up in the token table) and keeps that width the whole way through the model. You can think of the 512 numbers as 512 "features" the model has learned to track about that token. Bigger `c` means a more expressive model and more parameters.
-- **`h` (heads).** The number of separate attention units that run side by side inside each block. You haven't met attention yet (Chapter 11), but all you need for now is this: attention is the step where each token looks at the earlier tokens in its chunk and pulls in information from them. Instead of doing that once with the full 512-number vector, the model does it **8 times at once**, each time on a different **slice** of the vector. Each of those 8 attention units is a **head**. `h` is simply that count, so `h = 8`. The expanded explanation is just below, and Section 11.5 goes through it step by step.
-- **`d` (per-head width).** Each head only works on a slice of the vector: `d = c / h = 512 / 8 = 64`. Slicing the 512 numbers into 8 slices of 64 and then joining them back gives exactly 512 again, so `h × d = c` always holds. This is why `c` must divide evenly by `h`.
+- **`t` (time).** The position along a chunk, `0` for the first token, `1` for the second, and so on. It's called "time" because text is read in order, like a sequence over time. `1,024` is the **context length**: the most tokens the model can look at in one go. Shorter chunks are padded or cut so every chunk in a batch has the same `t`.
+- **`c` (channels).** The length of the vector that represents one token. Each token starts as a row of 768 numbers (looked up in the token table) and keeps that width the whole way through the model. You can think of the 768 numbers as 768 "features" the model has learned to track about that token. Bigger `c` means a more expressive model and more parameters.
+- **`h` (heads).** The number of separate attention units that run side by side inside each block. You haven't met attention yet (Chapter 11), but all you need for now is this: attention is the step where each token looks at the earlier tokens in its chunk and pulls in information from them. Instead of doing that once with the full 768-number vector, the model does it **12 times at once**, each time on a different **slice** of the vector. Each of those 12 attention units is a **head**. `h` is simply that count, so `h = 12`. The expanded explanation is just below, and Section 11.5 goes through it step by step.
+- **`d` (per-head width).** Each head only works on a slice of the vector: `d = c / h = 768 / 12 = 64`. Slicing the 768 numbers into 12 slices of 64 and then joining them back gives exactly 768 again, so `h × d = c` always holds. This is why `c` must divide evenly by `h`.
 - **`V` (vocabulary).** The number of distinct tokens the model knows (16,384). It appears in two places: the token table has shape `(V, c)`, and the final output has shape `(b, t, V)`, one score for every possible next token at every position.
 
 **How the letters fit together.** The shape changes as data moves through the model, but `b` and `t` stay fixed until the very end:
 
 ```
-token ids          (b, t)           2 × 512 whole numbers
-after lookup       (b, t, c)        each id becomes a 512-number vector
-split into heads   (b, h, t, d)     8 heads, each seeing 64 of the 512 numbers
+token ids          (b, t)           2 × 1,024 whole numbers
+after lookup       (b, t, c)        each id becomes a 768-number vector
+split into heads   (b, h, t, d)     12 heads, each seeing 64 of the 768 numbers
 attention scores   (b, h, t, t)     every token scored against every token
-joined heads       (b, t, c)        back to 512 numbers per token
+joined heads       (b, t, c)        back to 768 numbers per token
 final output       (b, t, V)        a score for each of 16,384 possible next tokens
 ```
 
-Sanity check with numbers: `b × t = 2 × 512 = 1,024` tokens per step, and the final output has `1,024 × 16,384 = 16,777,216` scores.
+Sanity check with numbers: `b × t = 2 × 1,024 = 2,048` tokens per step, and the final output has `2,048 × 16,384 = 33,554,432` scores.
 
 #### `h` and `d` in the shapes: splitting a vector into heads
 
-The `(b, t, c)` → `(b, h, t, d)` step in the table above is the one that confuses people, so here it is on one token. Take a single token's vector of `c = 512` numbers and cut it into `h = 8` equal slices. Each slice has `d = 512 / 8 = 64` numbers:
+The `(b, t, c)` → `(b, h, t, d)` step in the table above is the one that confuses people, so here it is on one token. Take a single token's vector of `c = 768` numbers and cut it into `h = 12` equal slices. Each slice has `d = 768 / 12 = 64` numbers:
 
 ```
-one token (c = 512 numbers)
+one token (c = 768 numbers)
 
-[ n0 ... n63 | n64 ... n127 | n128 ... n191 | ... | n448 ... n511 ]
+[ n0 ... n63 | n64 ... n127 | n128 ... n191 | ... | n704 ... n767 ]
   ───────────   ────────────   ─────────────         ─────────────
-   slice 0       slice 1        slice 2                slice 7
-   (head 0)      (head 1)       (head 2)               (head 7)
+   slice 0       slice 1        slice 2                slice 11
+   (head 0)      (head 1)       (head 2)               (head 11)
    d = 64        d = 64         d = 64                 d = 64
 ```
 
-Nothing is added or removed, it's the same 512 numbers regrouped, like pouring 512 beads from one tray into 8 cups of 64. That regrouping is all `(b, t, c) → (b, h, t, d)` does:
+Nothing is added or removed, it's the same 768 numbers regrouped, like pouring 768 beads from one tray into 12 cups of 64. That regrouping is all `(b, t, c) → (b, h, t, d)` does:
 
 | Shape | Reading it |
 |---|---|
-| `(b, t, c)` = `(2, 512, 512)` | 2 chunks, 512 tokens each, **one row of 512 numbers** per token |
-| `(b, h, t, d)` = `(2, 8, 512, 64)` | 2 chunks, **8 heads**, 512 tokens each, **64 numbers** per token per head |
+| `(b, t, c)` = `(2, 1024, 768)` | 2 chunks, 1,024 tokens each, **one row of 768 numbers** per token |
+| `(b, h, t, d)` = `(2, 12, 1024, 64)` | 2 chunks, **12 heads**, 1,024 tokens each, **64 numbers** per token per head |
 
-Check that nothing is lost: `2 × 512 × 512 = 524,288` numbers before, and `2 × 8 × 512 × 64 = 524,288` after.
+Check that nothing is lost: `2 × 1,024 × 768 = 1,572,864` numbers before, and `2 × 12 × 1,024 × 64 = 1,572,864` after.
 
-So what is the point of regrouping? Each head then runs its own attention on only its own slice, completely independently of the other 7. Eight independent runs means each token can decide who to look at in 8 different ways at once, instead of in just one. At the end, the 8 results (64 numbers each) are placed side by side to get back to 512 numbers, which is the `(b, h, t, d) → (b, t, c)` step.
+So what is the point of regrouping? Each head then runs its own attention on only its own slice, completely independently of the other 11. Twelve independent runs means each token can decide who to look at in 12 different ways at once, instead of in just one. At the end, the 12 results (64 numbers each) are placed side by side to get back to 768 numbers, which is the `(b, h, t, d) → (b, t, c)` step.
 
-Keep two things apart, since both are "8" in this project:
-- `h = 8` is the number of **heads inside one block** (how many ways the block looks at the text).
-- The number of **layers** (also 8 in the 34M model) is how many blocks are stacked on top of each other. They are different settings that happen to match, so the full model has 8 × 8 = 64 heads in total.
+Keep two things apart, since both are "12" in the `big` model:
+- `h = 12` is the number of **heads inside one block** (how many ways the block looks at the text).
+- The number of **layers** (also 12 in the `big` model) is how many blocks are stacked on top of each other. They are different settings that happen to match, so the full model has 12 × 12 = 144 heads in total.
 
-So the main data flowing through the model has shape **`(b, t, c)`**. Read it left to right: "for each chunk of text, for each token in it, 512 numbers." Pointing at one value takes three positions, like `[1, 40, 7]`: chunk 1, token 40, number 7 of that token's vector.
+So the main data flowing through the model has shape **`(b, t, c)`**. Read it left to right: "for each chunk of text, for each token in it, 768 numbers." Pointing at one value takes three positions, like `[1, 40, 7]`: chunk 1, token 40, number 7 of that token's vector.
 
 When you're confused, **write the shapes down.** Half of deep learning debugging is checking that shapes line up.
 
