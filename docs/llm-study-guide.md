@@ -333,7 +333,7 @@ chunk 3: tokens 1536 – 1999   (shorter, 464 tokens)
 - **`b` (batch).** The GPU is much faster doing 2 chunks at once than 1 chunk twice, so training feeds several independent chunks of text together. They never talk to each other; `b` is just "how many parallel copies of the same work." Here `b = 2` because memory is limited. A bigger batch gives a smoother learning signal but costs more memory.
 - **`t` (time).** The position along a chunk, `0` for the first token, `1` for the second, and so on. It's called "time" because text is read in order, like a sequence over time. `512` is the **context length**: the most tokens the model can look at in one go. Shorter chunks are padded or cut so every chunk in a batch has the same `t`.
 - **`c` (channels).** The length of the vector that represents one token. Each token starts as a row of 512 numbers (looked up in the token table) and keeps that width the whole way through the model. You can think of the 512 numbers as 512 "features" the model has learned to track about that token. Bigger `c` means a more expressive model and more parameters.
-- **`h` (heads).** Attention is split into 8 smaller attention units that run side by side. Each head can learn to look for something different, for example one tracks the previous word while another tracks a matching bracket. Their results are glued back together afterwards. (Section 11.5 breaks heads down step by step.)
+- **`h` (heads).** The number of separate attention units that run side by side inside each block. You haven't met attention yet (Chapter 11), but all you need for now is this: attention is the step where each token looks at the earlier tokens in its chunk and pulls in information from them. Instead of doing that once with the full 512-number vector, the model does it **8 times at once**, each time on a different **slice** of the vector. Each of those 8 attention units is a **head**. `h` is simply that count, so `h = 8`. The expanded explanation is just below, and Section 11.5 goes through it step by step.
 - **`d` (per-head width).** Each head only works on a slice of the vector: `d = c / h = 512 / 8 = 64`. Slicing the 512 numbers into 8 slices of 64 and then joining them back gives exactly 512 again, so `h × d = c` always holds. This is why `c` must divide evenly by `h`.
 - **`V` (vocabulary).** The number of distinct tokens the model knows (16,384). It appears in two places: the token table has shape `(V, c)`, and the final output has shape `(b, t, V)`, one score for every possible next token at every position.
 
@@ -349,6 +349,35 @@ final output       (b, t, V)        a score for each of 16,384 possible next tok
 ```
 
 Sanity check with numbers: `b × t = 2 × 512 = 1,024` tokens per step, and the final output has `1,024 × 16,384 = 16,777,216` scores.
+
+#### `h` and `d` in the shapes: splitting a vector into heads
+
+The `(b, t, c)` → `(b, h, t, d)` step in the table above is the one that confuses people, so here it is on one token. Take a single token's vector of `c = 512` numbers and cut it into `h = 8` equal slices. Each slice has `d = 512 / 8 = 64` numbers:
+
+```
+one token (c = 512 numbers)
+
+[ n0 ... n63 | n64 ... n127 | n128 ... n191 | ... | n448 ... n511 ]
+  ───────────   ────────────   ─────────────         ─────────────
+   slice 0       slice 1        slice 2                slice 7
+   (head 0)      (head 1)       (head 2)               (head 7)
+   d = 64        d = 64         d = 64                 d = 64
+```
+
+Nothing is added or removed, it's the same 512 numbers regrouped, like pouring 512 beads from one tray into 8 cups of 64. That regrouping is all `(b, t, c) → (b, h, t, d)` does:
+
+| Shape | Reading it |
+|---|---|
+| `(b, t, c)` = `(2, 512, 512)` | 2 chunks, 512 tokens each, **one row of 512 numbers** per token |
+| `(b, h, t, d)` = `(2, 8, 512, 64)` | 2 chunks, **8 heads**, 512 tokens each, **64 numbers** per token per head |
+
+Check that nothing is lost: `2 × 512 × 512 = 524,288` numbers before, and `2 × 8 × 512 × 64 = 524,288` after.
+
+So what is the point of regrouping? Each head then runs its own attention on only its own slice, completely independently of the other 7. Eight independent runs means each token can decide who to look at in 8 different ways at once, instead of in just one. At the end, the 8 results (64 numbers each) are placed side by side to get back to 512 numbers, which is the `(b, h, t, d) → (b, t, c)` step.
+
+Keep two things apart, since both are "8" in this project:
+- `h = 8` is the number of **heads inside one block** (how many ways the block looks at the text).
+- The number of **layers** (also 8 in the 34M model) is how many blocks are stacked on top of each other. They are different settings that happen to match, so the full model has 8 × 8 = 64 heads in total.
 
 So the main data flowing through the model has shape **`(b, t, c)`**. Read it left to right: "for each chunk of text, for each token in it, 512 numbers." Pointing at one value takes three positions, like `[1, 40, 7]`: chunk 1, token 40, number 7 of that token's vector.
 
