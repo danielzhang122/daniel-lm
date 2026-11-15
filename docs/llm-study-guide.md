@@ -127,7 +127,7 @@ Don't worry if these don't make sense yet. Each one is explained properly in its
 
 > 📌 **Why ~98 million knobs?** There is no magic in the number. It is just every adjustable number in the model, counted up: the token table (16,384 tokens × 768 numbers = 12,582,912), the position table (1,024 positions × 768 numbers = 786,432), and 12 identical-shaped blocks of 7,084,800 each (85,017,600 in total), plus about 1,500 in the final LayerNorm. 12,582,912 + 786,432 + 85,017,600 + 1,536 = **98,388,480**. Making the model wider (a bigger 768) or deeper (more than 12 blocks) is how it gets more knobs.
 
-**This guide uses the `big` run's numbers everywhere** (width 768, 12 layers, 12 heads, context 1,024, ~98M knobs), and repeats them in a short reminder box at the start of each chapter so you don't have to scroll back. The first, smaller model (the `full` run) had width 512, 8 layers, 8 heads, a 512-token context and ~98M knobs; it is only mentioned where noted. The sizes are set with `--width`, `--layers`, `--heads` and `--context` in `train.py`. Chapter 6 compares the two side by side.
+**This guide uses the `big` run's numbers everywhere** (width 768, 12 layers, 12 heads, context 1,024, ~98M knobs), and repeats them in a short reminder box at the start of each chapter so you don't have to scroll back. The sizes are set with `--width`, `--layers`, `--heads` and `--context` in `train.py`.
 
 **The hardware:** one RTX 4070 Ti graphics card (12 GB of memory). The model size was picked so it trains on that card in a reasonable time.
 
@@ -304,7 +304,7 @@ To read one value, you give one position per dimension, counting from 0. In the 
 | 3 | `(2, 1024, 768)` | a batch of text going through the model | 2 chunks of text, 1,024 tokens each, 768 numbers per token |
 | 4 | `(2, 12, 1024, 1024)` | attention scores | 2 chunks, 12 heads, and for each of 1,024 tokens, a score for each of 1,024 tokens |
 
-The shapes above use this guide's `big` run settings (width 768, context 1,024, 12 heads), so that no two letters share the same value. (The first, smaller model used 512 for both width and context, which made them easy to mix up.) Check the token table: `16,384 × 768 = 12,582,912` numbers. That's one shape, and you already know how big it is.
+The shapes above use this guide's `big` run settings (width 768, context 1,024, 12 heads), so that no two letters share the same value (width and context are different numbers). Check the token table: `16,384 × 768 = 12,582,912` numbers. That's one shape, and you already know how big it is.
 
 **Shape letters used in this guide (and in `model.py`):**
 
@@ -966,15 +966,7 @@ Important: the model predicts the next token **at every position at once**. Feed
 >
 > The row of boxes, `Embedding → Block 1 → Block 2 → …`, is the diagram above turned sideways. The **forward pass** is the trip your token IDs take, left to right, to become a prediction. Click a box to see what that stage does and how many knobs it holds.
 >
-> The diagram above shows this guide's model (the `big` run). The first, smaller model (the `full` run) has the **same design, only smaller**:
->
-> | | This guide (`big` run) | First model (`full` run) |
-> |---|---|---|
-> | Numbers per token (width) | 768 | 512 |
-> | Blocks | 12 | 8 |
-> | Attention heads per block | 12 (64 numbers each) | 8 (64 numbers each) |
-> | Context (max tokens) | 1,024 | 512 |
-> | Total knobs | 98.4 M | 33.9 M |
+> The diagram above shows this guide's model (the `big` run): width 768, 12 blocks, 12 heads of 64 numbers each, a 1,024-token context and 98.4 M knobs.
 >
 > So when the dashboard's Embedding box says **"768 dimensions"** and **"12,582,912 token + 786,432 position parameters"**, it's showing this guide's model:
 >
@@ -1407,8 +1399,6 @@ This "normalize, then do the thing, then add back" pattern is called **pre-norm*
 | **Total** | | **98,388,480 ≈ 98 M** |
 
 Most of the knobs sit in the blocks: 85 M of the 98 M (about 86%). The embeddings are only about 13.4 M. A wider or deeper model gets its extra "brain" mostly from bigger or more blocks.
-
-For comparison, the first, smaller model (width 512, 8 blocks, 512 positions) had 8,388,608 (token embedding) + 262,144 (position embedding) + 8 × 3,150,336 (blocks) + 1,024 (final LayerNorm) = 33,854,464 ≈ 34 M knobs. Same recipe, smaller numbers.
 
 ---
 
@@ -1878,18 +1868,18 @@ loss.backward()      # ← backprop; fills every knob's .grad
 
 ### 17.3 Gradient accumulation
 
-The GPU's memory (**VRAM**, **V**ideo **RAM**; 12 GB on the RTX 4070 Ti) limits how many chunks fit at once. Say only 2 fit. But bigger batches give steadier, less noisy gradients. Solution:
+The GPU's memory (**VRAM**, **V**ideo **RAM**; 12 GB on the RTX 4070 Ti) limits how many chunks fit at once. Say only 4 fit. But bigger batches give steadier, less noisy gradients. Solution:
 
 ```python
 opt.zero_grad()                       # clear old gradients
-for _ in range(8):                    # --accum 8
+for _ in range(4):                    # --accum 4
     loss = compute_loss(next_batch)
-    (loss / 8).backward()             # gradients ADD into .grad
+    (loss / 4).backward()             # gradients ADD into .grad
 opt.step()                            # one update using the summed gradient
 ```
-Result: identical to a batch of 16 chunks = **2 × 8 × 1,024 = 16,384 tokens per update step**. Dividing by 8 makes it an average instead of a sum.
+Result: identical to a batch of 16 chunks = **4 × 4 × 1,024 = 16,384 tokens per update step**. Dividing by 4 makes it an average instead of a sum.
 
-> 📌 **In the `big` run:** the same 16 chunks go through in one pass (`--batch 16 --accum 1`), so 16 × 1,024 = 16,384 tokens per step, the same total. Accumulation is the trick for when they *don't* all fit; the `train.py` default is `--batch 2 --accum 8`.
+> 📌 **In the `big` run:** the same 16 chunks go through in one pass (`--batch 16 --accum 1`), so 16 × 1,024 = 16,384 tokens per step, the same total. Accumulation is the trick for when they *don't* all fit.
 
 ### 17.4 Gradient clipping
 
@@ -2114,7 +2104,7 @@ Even unlikely tokens have some tiny probability, and across 16,384 tokens those 
 
 ### 18.3 Context window
 
-The model can only see a fixed number of tokens: 1,024 for this guide's model (the first, smaller one saw 512). When the text gets longer, `generate.py` feeds only the **last** 1,024 (`x[:, -context:]`). The model completely forgets anything earlier.
+The model can only see a fixed number of tokens: 1,024 for this guide's model. When the text gets longer, `generate.py` feeds only the **last** 1,024 (`x[:, -context:]`). The model completely forgets anything earlier.
 
 ---
 
