@@ -288,6 +288,25 @@ Check the token table: `16,384 × 512 = 8,388,608` numbers. That's one shape, an
 | `d` | per-head width = `c / h` | 64 |
 | `V` | **vocabulary** size: how many different tokens exist | 16,384 |
 
+#### What is a chunk?
+
+A **chunk** is one fixed-length slice of the training text: a run of up to 512 consecutive tokens (`t`) that the model reads as a single unit.
+
+The model can only look at 512 tokens at a time, but a book or a Wikipedia dump is millions of tokens. So the text is tokenized into one long stream of token ids, then cut into pieces of at most 512 tokens. Each piece is a chunk.
+
+```
+tokens:  [ 17, 903, 4, 55, 2210, ... 2,000 ids ... ]
+
+chunk 0: tokens    0 – 511
+chunk 1: tokens  512 – 1023
+chunk 2: tokens 1024 – 1535
+chunk 3: tokens 1536 – 1999   (shorter, 464 tokens)
+```
+
+- A chunk is **not** a sentence or paragraph. It can start or end mid-sentence, because the cut is by token count, not by meaning.
+- The batch size `b = 2` means each training step takes 2 chunks and processes them in parallel. They are independent: tokens in one chunk never attend to tokens in another. The input shape `(b, t)` reads "2 chunks, 512 token ids each."
+- At every position in a chunk the model predicts the next token, so one 512-token chunk gives 512 prediction exercises at once. Position 40 can only see tokens 0 to 40, never later ones.
+
 #### What each letter really means
 
 - **`b` (batch).** The GPU is much faster doing 2 chunks at once than 1 chunk twice, so training feeds several independent chunks of text together. They never talk to each other; `b` is just "how many parallel copies of the same work." Here `b = 2` because memory is limited. A bigger batch gives a smoother learning signal but costs more memory.
