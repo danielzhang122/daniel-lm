@@ -1056,6 +1056,78 @@ y = x @ W.T + b
 
 > 🧒 **ELI5, neurons:** people call each output number of a Linear layer a **neuron**. A neuron isn't a little brain cell inside the computer. It's one row of `W`, a recipe that says "take this much of input 1, this much of input 2, …, and add it all up". The weights in that row are its **connections**.
 
+### 8.1 Neurons, in depth
+
+A **neuron** is one small calculation: it looks at *all* the input numbers, multiplies each by its own weight, adds them up, and adds its own bias. It produces **one** number. A Linear layer is just a group of neurons that all look at the same inputs, each with its own private set of weights.
+
+Here is a tiny Linear layer with 2 inputs and 3 neurons (`W` has shape `(3, 2)`, so 3 rows, one per neuron):
+
+```
+x = [1, 2]                     the 2 input numbers
+
+neuron 1:  weights [ 1,   0 ]   bias 0     →  1×1 + 0×2   + 0 = 1
+neuron 2:  weights [ 0.5, 0.5]  bias 1     →  0.5×1 + 0.5×2 + 1 = 2.5
+neuron 3:  weights [-1,   2 ]   bias 0     →  −1×1 + 2×2  + 0 = 3
+
+y = [1, 2.5, 3]                the 3 output numbers, one per neuron
+```
+
+Read it like this:
+- **The number of rows of `W` = the number of neurons = the length of the output.** `W` of shape `(out, in)` means `out` neurons, each with `in` connections.
+- **Each neuron has its own weights** (its row) and its own bias, so each can learn to respond to something different in the input. Neuron 1 above only cares about the first input; neuron 3 mostly cares about the second.
+- **Connections** are the individual weights. Each line you see in the dashboard's "Neurons & connections" picture (Section 12.1) is one of these weights, drawn from an input to a neuron.
+- **Knob count:** a layer with `in` inputs and `out` neurons has `out × in` weights, plus `out` biases (if it has a bias). The example above has 3 × 2 = 6 weights and 3 biases.
+
+At full size, the first Linear layer in each block's MLP turns 768 numbers into 3,072. That is **3,072 neurons**, each with **768 connections**: 3,072 × 768 = 2,359,296 weights, plus 3,072 biases.
+
+**One more detail: neurons usually have an activation.** Textbooks often draw a neuron as "weighted sum, then a bend" (the bend is the activation function from Chapter 9). In this model that bend, GELU, is applied after the MLP's first Linear layer, so those 3,072 neurons each get weighted-summed, then bent. The other Linear layers (attention's, and the MLP's second one) produce plain weighted sums with no GELU straight after. Either way, "neuron" just means "one output of a Linear layer".
+
+> 💡 **Key idea:** A Linear layer of shape `(out, in)` is `out` neurons side by side. Each neuron mixes all `in` inputs with its own weights to make one number.
+
+### 8.2 Which Linear layers are in this model?
+
+Every block contains **4 Linear layers**. These are all of them (from `model.py`), for the `big` run with width 768:
+
+| Where | Name in `model.py` | Shape `(out, in)` | Neurons (outputs) | Connections each | Bias? | What it's for |
+|---|---|---|---|---|---|---|
+| Attention | `qkv` | (2,304, 768) | 2,304 | 768 | no | makes Q, K and V for every token (3 × 768) (Chapter 11) |
+| Attention | `proj` | (768, 768) | 768 | 768 | no | the projection that mixes the 12 heads' results (Section 11.5) |
+| MLP | `mlp[0]` ("Linear 1") | (3,072, 768) | 3,072 | 768 | yes | widens each token's vector to 4× its size (Section 12.1) |
+| MLP | `mlp[2]` ("Linear 2") | (768, 3,072) | 768 | 3,072 | yes | narrows it back to 768 (Section 12.1) |
+
+With 12 blocks, that makes **12 × 4 = 48 Linear layers**. There is also one more matrix multiply at the very end, the output head (Chapter 13). It isn't a separate `nn.Linear`: it reuses the token table (16,384 × 768) as its weights, so it adds no new knobs.
+
+Most of the model's knobs are the weights of these Linear layers (Section 12.4 counts them).
+
+### 8.3 What "layer" means in this guide (it means several things)
+
+The word **layer** is used loosely in machine learning, and this guide uses it a few ways. If a sentence confuses you, check which meaning it is:
+
+| You read... | It means | Example |
+|---|---|---|
+| "**Linear layer**" | one `y = x @ W.T + b` step (this chapter) | `qkv`, `proj`, `mlp[0]`, `mlp[2]` |
+| "**12 layers**" (width 768, **12 layers**, 12 heads) | the number of **blocks** stacked on top of each other. In `model.py` the setting is called `layers` and it builds that many `Block`s | the whole box in the Chapter 6 diagram, repeated 12 times |
+| "**a layer**" in `x = x + layer(x)` (Section 12.2) | one *step inside a block*: the attention step or the MLP step | attention is one such layer, the MLP is another |
+| "**LayerNorm**" (Chapter 10) | a different thing with "layer" in its name: it normalizes numbers, and has no connections to learn | `norm1`, `norm2`, final `norm` |
+| "**each layer**" in Chapters 14 to 16 (backprop) | each *kind of operation* that needs its own backward rule | Linear, GELU, LayerNorm, attention, embeddings |
+| "**hidden layer**" / "**hidden neurons**" | the in-between values that aren't the input or the final output. The 3,072 numbers inside the MLP are hidden neurons | MLP's widened middle |
+
+So when a later chapter says "the layer", look at the surrounding sentence:
+- Talking about **shapes or weights** → almost always a **Linear layer** (one of the 48 above).
+- Talking about **depth, "12 layers" or "all layers"** → the **blocks**.
+- Talking about the **residual `x + layer(x)`** → the attention or MLP *inside one block*.
+- Talking about **backprop** → whichever operation's backward rule is being written.
+
+A picture of one block, with every Linear layer marked:
+
+```
+x ─► LayerNorm ─► [ Linear: qkv ] ─► attention ─► [ Linear: proj ] ─► (+ x) ─►
+x ─► LayerNorm ─► [ Linear 1 ] ─► GELU ─► [ Linear 2 ]              ─► (+ x) ─► out
+                   768 → 3,072            3,072 → 768
+```
+
+This box is repeated 12 times, and that repetition is the "12 layers" in the model's settings.
+
 ---
 
 ## Chapter 9: Activation functions (GELU)
