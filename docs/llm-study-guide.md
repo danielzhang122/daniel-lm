@@ -333,7 +333,7 @@ chunk 3: tokens 1536 – 1999   (shorter, 464 tokens)
 - **`b` (batch).** The GPU is much faster doing 2 chunks at once than 1 chunk twice, so training feeds several independent chunks of text together. They never talk to each other; `b` is just "how many parallel copies of the same work." Here `b = 2` because memory is limited. A bigger batch gives a smoother learning signal but costs more memory.
 - **`t` (time).** The position along a chunk, `0` for the first token, `1` for the second, and so on. It's called "time" because text is read in order, like a sequence over time. `512` is the **context length**: the most tokens the model can look at in one go. Shorter chunks are padded or cut so every chunk in a batch has the same `t`.
 - **`c` (channels).** The length of the vector that represents one token. Each token starts as a row of 512 numbers (looked up in the token table) and keeps that width the whole way through the model. You can think of the 512 numbers as 512 "features" the model has learned to track about that token. Bigger `c` means a more expressive model and more parameters.
-- **`h` (heads).** Attention is split into 8 smaller attention units that run side by side. Each head can learn to look for something different, for example one tracks the previous word while another tracks a matching bracket. Their results are glued back together afterwards.
+- **`h` (heads).** Attention is split into 8 smaller attention units that run side by side. Each head can learn to look for something different, for example one tracks the previous word while another tracks a matching bracket. Their results are glued back together afterwards. (Section 11.5 breaks heads down step by step.)
 - **`d` (per-head width).** Each head only works on a slice of the vector: `d = c / h = 512 / 8 = 64`. Slicing the 512 numbers into 8 slices of 64 and then joining them back gives exactly 512 again, so `h × d = c` always holds. This is why `c` must divide evenly by `h`.
 - **`V` (vocabulary).** The number of distinct tokens the model knows (16,384). It appears in two places: the token table has shape `(V, c)`, and the final output has shape `(b, t, V)`, one score for every possible next token at every position.
 
@@ -1144,7 +1144,54 @@ token 4:         ✓   ✓   ✓   ✓
 
 ### 11.5 Multiple heads
 
-Instead of one attention with width 512, the model runs **8 attentions in parallel** (8 **heads**), each on a 64-number slice. Each head can specialize. One might track "which noun does this pronoun refer to?", another "what was the last verb?", another "what's the topic?". Their outputs are glued back together (8 × 64 = 512) and passed through one more Linear layer, the **projection**.
+Instead of one attention with width 512, the model runs **8 attentions in parallel** (8 **heads**), each on a 64-number slice. Their outputs are glued back together (8 × 64 = 512) and passed through one more Linear layer, the **projection**. The rest of this section breaks that down step by step.
+
+#### The problem: one attention can only ask one question
+
+In 11.2, each token makes one Query and compares it against every earlier token's Key, giving one set of attention weights. That means each token gets **one** way of deciding who to listen to. But a single token often needs several kinds of information at once. Take:
+
+> "The trophy didn't fit in the suitcase because **it** was too big."
+
+To understand "it", the model may want to know *which noun it refers to* (trophy or suitcase), *what kind of word comes next* (an adjective like "big"), and *where we are in the sentence*. One set of weights has to compromise between all of those. With several heads, each one gets its own set of weights, so each can listen to different tokens for a different reason.
+
+#### Step 1: cut the vector into 8 slices
+
+Each token's vector has 512 numbers. Cut it into 8 equal slices of 64, like cutting a row of 512 beads into 8 groups of 64:
+
+```
+one token's vector (512 numbers)
+[ 64 | 64 | 64 | 64 | 64 | 64 | 64 | 64 ]
+  h0   h1   h2   h3   h4   h5   h6   h7
+```
+
+Head 0 works on the first 64 numbers, head 1 on the next 64, and so on. (In the code, Q, K and V are each cut this way, so every head gets its own 64-number Q, K and V per token.)
+
+#### Step 2: every head runs a complete, separate attention
+
+Each head does exactly the attention from 11.2 on its own slice: compare its Queries to its Keys, apply the causal mask, softmax, then take a weighted mix of its Values. The heads **never see each other's slices**, so they run completely independently. That is why they can be run at the same time on the GPU, and why the scores have shape `(b, h, t, t)`: one `t × t` grid of attention weights *per head*, per chunk.
+
+Because each head has its own Q/K/V weights, each is free to learn different weights. For the same token, head 0 might put most of its weight on one earlier token while head 5 spreads its weight over many tokens, or looks at the token right before.
+
+#### Step 3: glue the heads back together
+
+Each head hands back 64 numbers for the token. Putting the 8 results side by side gives 8 × 64 = 512 numbers again, the same width we started with:
+
+```
+head 0 out (64) | head 1 out (64) | ... | head 7 out (64)   →   512 numbers
+```
+
+#### Step 4: the projection mixes them
+
+Right after gluing, the 512 numbers are still just 8 separate blocks, and nothing has combined what head 0 found with what head 1 found. The **projection** (`self.proj`, a Linear layer, 512 → 512) fixes this: every output number is a weighted sum of *all* 512 inputs, so information from different heads gets blended into the final result.
+
+#### What do the heads actually learn?
+
+Nobody assigns jobs to heads. All 8 start with random weights and training pushes each one toward whatever helps lower the loss. In practice, researchers who inspect trained transformers find heads that do things like "look at the previous token", "look back at an earlier repeat of this word", or "attend to the start of the sentence", but many heads are messier and don't have a neat label. Treat examples like "this head tracks pronouns" as illustrations of what's *possible*, not a guarantee about this particular model.
+#### Why 8 small heads instead of 1 big one?
+
+The cost is about the same. 8 heads of width 64 do roughly the same amount of arithmetic as one head of width 512, since each head's slice is 8× smaller. So splitting is nearly free, but it gives the model 8 independent attention patterns per layer instead of 1. With 8 layers, that's 64 heads in the 34M model.
+
+> 💡 **In one line:** a head is one independent attention run on a 64-number slice of each token. 8 heads means 8 different ways of deciding who to look at, glued together and mixed by the projection.
 
 ### 11.6 In the code
 
