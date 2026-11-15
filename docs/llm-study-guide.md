@@ -288,6 +288,28 @@ Check the token table: `16,384 × 512 = 8,388,608` numbers. That's one shape, an
 | `d` | per-head width = `c / h` | 64 |
 | `V` | **vocabulary** size: how many different tokens exist | 16,384 |
 
+#### What each letter really means
+
+- **`b` (batch).** The GPU is much faster doing 2 chunks at once than 1 chunk twice, so training feeds several independent chunks of text together. They never talk to each other; `b` is just "how many parallel copies of the same work." Here `b = 2` because memory is limited. A bigger batch gives a smoother learning signal but costs more memory.
+- **`t` (time).** The position along a chunk, `0` for the first token, `1` for the second, and so on. It's called "time" because text is read in order, like a sequence over time. `512` is the **context length**: the most tokens the model can look at in one go. Shorter chunks are padded or cut so every chunk in a batch has the same `t`.
+- **`c` (channels).** The length of the vector that represents one token. Each token starts as a row of 512 numbers (looked up in the token table) and keeps that width the whole way through the model. You can think of the 512 numbers as 512 "features" the model has learned to track about that token. Bigger `c` means a more expressive model and more parameters.
+- **`h` (heads).** Attention is split into 8 smaller attention units that run side by side. Each head can learn to look for something different, for example one tracks the previous word while another tracks a matching bracket. Their results are glued back together afterwards.
+- **`d` (per-head width).** Each head only works on a slice of the vector: `d = c / h = 512 / 8 = 64`. Slicing the 512 numbers into 8 slices of 64 and then joining them back gives exactly 512 again, so `h × d = c` always holds. This is why `c` must divide evenly by `h`.
+- **`V` (vocabulary).** The number of distinct tokens the model knows (16,384). It appears in two places: the token table has shape `(V, c)`, and the final output has shape `(b, t, V)`, one score for every possible next token at every position.
+
+**How the letters fit together.** The shape changes as data moves through the model, but `b` and `t` stay fixed until the very end:
+
+```
+token ids          (b, t)           2 × 512 whole numbers
+after lookup       (b, t, c)        each id becomes a 512-number vector
+split into heads   (b, h, t, d)     8 heads, each seeing 64 of the 512 numbers
+attention scores   (b, h, t, t)     every token scored against every token
+joined heads       (b, t, c)        back to 512 numbers per token
+final output       (b, t, V)        a score for each of 16,384 possible next tokens
+```
+
+Sanity check with numbers: `b × t = 2 × 512 = 1,024` tokens per step, and the final output has `1,024 × 16,384 = 16,777,216` scores.
+
 So the main data flowing through the model has shape **`(b, t, c)`**. Read it left to right: "for each chunk of text, for each token in it, 512 numbers." Pointing at one value takes three positions, like `[1, 40, 7]`: chunk 1, token 40, number 7 of that token's vector.
 
 When you're confused, **write the shapes down.** Half of deep learning debugging is checking that shapes line up.
