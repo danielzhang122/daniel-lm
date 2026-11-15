@@ -89,6 +89,27 @@ The rest of this guide explains each box.
 - About 1 in 100 articles is kept aside and never trained on. It's used to test the model on text it hasn't seen (`prepare.py`).
 - After tokenizing, the full dataset is about **4.5 billion tokens**.
 
+**What "training on Wikipedia" actually means:**
+
+The model is never told facts or given labelled questions. Wikipedia supplies both the question and the answer, because the answer to "what comes next?" is just the text that comes next. One training step goes like this:
+
+1. **Take real text from Wikipedia.** It is tokenized (turned into numbers) and cut into chunks of up to 512 tokens.
+2. **Ask the model to match it.** At every position in the chunk, the model sees only the tokens before that point and guesses the next token. It gives a probability for each of the 16,384 possible tokens.
+3. **Compare with what Wikipedia really says.** The correct answer is the token that actually came next in the article.
+4. **Get the loss.** The loss is one number measuring how much probability the model gave to the correct tokens, averaged over every position (`cross_entropy` in `train.py`). High probability on the right token means a low loss; low probability means a high loss.
+5. **Adjust the knobs.** Backpropagation works out how each parameter should change to lower the loss, and the optimizer nudges them a tiny bit.
+6. **Repeat** over the whole dataset.
+
+```
+Wikipedia text → tokens → chunk → model guesses next token at every position
+                                          │
+        the real next tokens (from the same chunk) ──► compare ──► loss
+                                                                    │
+                                    adjust parameters to lower it ◄─┘
+```
+
+It is not trying to reproduce whole sentences in one go, only the next token, over and over, and 512 of those guesses are graded per chunk. At the start the model guesses at random, so the loss is about `ln(16,384) ≈ 9.7`. As training goes on it falls, which means the model is getting better at predicting real Wikipedia text. Chapters 1 and 3 explain the idea and the loss in detail.
+
 **The numbers, and where they come from:**
 
 Don't worry if these don't make sense yet. Each one is explained properly in its own chapter as you read through the guide; this table is just a quick reference.
