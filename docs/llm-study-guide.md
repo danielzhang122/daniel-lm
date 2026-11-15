@@ -1187,6 +1187,41 @@ Right after gluing, the 512 numbers are still just 8 separate blocks, and nothin
 #### What do the heads actually learn?
 
 Nobody assigns jobs to heads. All 8 start with random weights and training pushes each one toward whatever helps lower the loss. In practice, researchers who inspect trained transformers find heads that do things like "look at the previous token", "look back at an earlier repeat of this word", or "attend to the start of the sentence", but many heads are messier and don't have a neat label. Treat examples like "this head tracks pronouns" as illustrations of what's *possible*, not a guarantee about this particular model.
+#### Attention patterns: seeing what a head looks at
+
+An **attention pattern** is the grid of attention weights one head produces for one piece of text: row = the token doing the looking, column = the token being looked at, and each cell is how much weight the row token puts on the column token. Each row sums to 1 (it's a softmax), and because of the causal mask everything above the diagonal is 0. Researchers plot these as heatmaps to understand what a model is doing. It is the main way people look inside a transformer.
+
+Here is a made-up pattern for one head on the text "the cat sat on the mat". Darker (`█`) means more weight:
+
+```
+                 looked at →
+              the  cat  sat  on   the  mat
+looking  the   █    ·    ·    ·    ·    ·
+   ↓     cat   ░    ▓    ·    ·    ·    ·
+         sat   ·    █    ░    ·    ·    ·
+         on    ·    ·    █    ▒    ·    ·
+         the   ░    ·    ·    █    ░    ·
+         mat   ·    ▓    ·    ·    ░    ▒
+```
+
+Reading a row: "mat" puts most of its weight on "cat" and a little on itself, "the" and the other tokens. Reading the whole grid shows the head's habit. In this made-up example, most tokens look at the token right before them, a "previous token" head.
+
+Some common shapes that people find in real models:
+
+| Pattern | What it looks like | What it does |
+|---|---|---|
+| **Previous token** | bright stripe just below the diagonal | each token looks at the one right before it |
+| **Self / diagonal** | bright on the diagonal | each token mostly looks at itself |
+| **First token** | one bright column on the left | most tokens look at the first token, which acts as a "resting place" when nothing else is useful |
+| **Repeat / induction** | stripe pointing to the token *after* an earlier copy of the current word | helps the model copy patterns it saw earlier in the text |
+| **Broad / diffuse** | weights spread thinly over many tokens | averages over a lot of context, like a summary |
+
+There is one pattern per head, per layer, per piece of text, so the full set for an 8-layer, 8-head model on a 512-token chunk is 64 grids of 512 × 512. These are the `(b, h, t, t)` attention scores from earlier, after the softmax.
+
+**Caveats.** An attention pattern shows where a head *reads from*, not what it *does* with what it reads: the Values and the later layers still matter. So a pattern is a useful clue, not a full explanation, and many heads have no clean label.
+
+> 📌 **In this project:** nothing here extracts or plots attention patterns. `F.scaled_dot_product_attention` computes the weights internally and returns only the final mixed output, so the `t × t` grid is never kept. Seeing the patterns would need extra code, such as writing attention by hand (like the handwritten version in Chapter 15) so the grid can be saved and plotted.
+
 #### Why 8 small heads instead of 1 big one?
 
 The cost is about the same. 8 heads of width 64 do roughly the same amount of arithmetic as one head of width 512, since each head's slice is 8× smaller. So splitting is nearly free, but it gives the model 8 independent attention patterns per layer instead of 1. With 8 layers, that's 64 heads in the 34M model.
