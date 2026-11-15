@@ -391,14 +391,23 @@ We use `exp` to turn scores into probabilities (Chapter 13) and `log` to grade t
 
 ### 2.5 Derivatives: "how sensitive is the output to this input?"
 
-The **derivative** of `y` with respect to `x`, written `dy/dx`, answers:
+The **derivative** of `y` with respect to `x`, written `dy/dx`, is the **rate of change** of `y` as `x` changes. It answers:
 
-> If I nudge `x` up by a tiny bit, how much does `y` change, and in which direction?
+> For every 1 unit that `x` goes up, how many units does `y` go up (or down)?
+
+"Rate of change" is the same idea as speed. If you drive 60 km in 1 hour, your speed is 60 km per hour: distance (the output) changes at a rate of 60 for each hour (the input). A derivative is that same "output change per input change" ratio, for any function.
+
+- A **positive** derivative means `y` goes up as `x` goes up.
+- A **negative** derivative means `y` goes down as `x` goes up.
+- A derivative of **0** means `y` isn't changing at that point.
+- A **big** number (positive or negative) means `y` changes quickly; a **small** one means it changes slowly.
 
 Examples:
-- `y = 3x` → `dy/dx = 3`. Nudge x by 0.01 and y goes up by 0.03.
-- `y = x²` → `dy/dx = 2x`. At x=5 the slope is 10. At x=−5 it's −10, so nudging x *up* makes y go *down*.
-- `y = -x` → `dy/dx = -1`.
+- `y = 3x` → `dy/dx = 3`. The rate is 3 everywhere: each 1 step in x adds 3 to y. (So a small step of 0.01 in x adds 0.03 to y.)
+- `y = x²` → `dy/dx = 2x`. The rate depends on where you are. At x=5 the rate is 10 (y is rising fast). At x=−5 it's −10, so as x goes *up*, y goes *down*. At x=0 it's 0, the bottom of the curve where y momentarily stops changing.
+- `y = -x` → `dy/dx = -1`. Each 1 step in x takes 1 away from y.
+
+**Why "nudge"?** For a curve like `y = x²` the rate changes from point to point, so "per 1 unit of x" is too coarse: by the time x moves a whole unit, the rate has already changed. So we measure the rate over a *tiny* nudge instead, and divide the change in `y` by the change in `x`. The derivative is what that ratio settles at as the nudge shrinks toward zero. The nudge is how you *measure* the rate of change, not what the derivative *is*.
 
 You can always **measure** a derivative by nudging:
 ```
