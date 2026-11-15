@@ -93,7 +93,7 @@ The rest of this guide explains each box.
 
 The model is never told facts or given labelled questions. Wikipedia supplies both the question and the answer, because the answer to "what comes next?" is just the text that comes next. One training step goes like this:
 
-1. **Take real text from Wikipedia.** It is tokenized (turned into numbers) and cut into chunks of up to 512 tokens.
+1. **Take real text from Wikipedia.** It is tokenized (turned into numbers) and cut into chunks of up to 1,024 tokens.
 2. **Ask the model to match it.** At every position in the chunk, the model sees only the tokens before that point and guesses the next token. It gives a probability for each of the 16,384 possible tokens.
 3. **Compare with what Wikipedia really says.** The correct answer is the token that actually came next in the article.
 4. **Get the loss.** The loss is one number measuring how much probability the model gave to the correct tokens, averaged over every position (`cross_entropy` in `train.py`). High probability on the right token means a low loss; low probability means a high loss.
@@ -108,7 +108,7 @@ Wikipedia text → tokens → chunk → model guesses next token at every positi
                                     adjust parameters to lower it ◄─┘
 ```
 
-It is not trying to reproduce whole sentences in one go, only the next token, over and over, and 512 of those guesses are graded per chunk. At the start the model guesses at random, so the loss is about `ln(16,384) ≈ 9.7`. As training goes on it falls, which means the model is getting better at predicting real Wikipedia text. Chapters 1 and 3 explain the idea and the loss in detail.
+It is not trying to reproduce whole sentences in one go, only the next token, over and over, and 1,024 of those guesses are graded per chunk. At the start the model guesses at random, so the loss is about `ln(16,384) ≈ 9.7`. As training goes on it falls, which means the model is getting better at predicting real Wikipedia text. Chapters 1 and 3 explain the idea and the loss in detail.
 
 **The numbers, and where they come from:**
 
@@ -117,15 +117,17 @@ Don't worry if these don't make sense yet. Each one is explained properly in its
 | Number | What it is | Where it comes from |
 |---|---|---|
 | **16,384** | vocabulary size: how many different tokens exist | Chosen in `prepare.py` when the tokenizer is trained. It's 2¹⁴, a round number in binary. Bigger means fewer tokens per sentence but a bigger model. It also has to stay under 65,536, because each token ID is saved to disk as a 2-byte number (`uint16`). |
-| **512** (context) | how many tokens the model can look at at once | `--context` in `train.py`, and the size of the position table in `model.py`. Anything older than 512 tokens is forgotten. |
-| **512** (width) | how many numbers describe each token inside the model | `width` in `model.py`. A different 512 from the context, it's just a coincidence they match. |
-| **8** layers | how many blocks the data passes through | `layers` in `model.py`. |
-| **8** heads | how many separate attention units each block has | `heads` in `model.py`. 512 ÷ 8 = **64** numbers per head. |
-| **~34 million** | total parameters | Comes from the settings above. About 8.4M are in the token table (16,384 × 512); most of the rest are in the 8 blocks, about 3.2M each. |
-| **8,192** | tokens per training step on the full run | `train_full.py` uses `--batch 16 --accum 1`, and 16 × 512 = 8,192. |
-| **550,550** | steps in the full run | 4.5 billion tokens ÷ 8,192 tokens per step ≈ 550,000, so the model reads the whole dataset about once. |
+| **1,024** (context) | how many tokens the model can look at at once | `--context` in `train.py`, and the size of the position table in `model.py`. Anything older than 1,024 tokens is forgotten. |
+| **768** (width) | how many numbers describe each token inside the model | `width` in `model.py`. |
+| **12** layers | how many blocks the data passes through | `layers` in `model.py`. |
+| **12** heads | how many separate attention units each block has | `heads` in `model.py`. 768 ÷ 12 = **64** numbers per head. |
+| **~98 million** | total parameters ("knobs") | Comes from the settings above. About 12.6M are in the token table (16,384 × 768), 0.8M in the position table (1,024 × 768), and about 85M in the 12 blocks (about 7.1M each). Section 12.4 adds it all up. |
+| **16,384** | tokens per training step | The run uses `--batch 16 --accum 1`, and 16 × 1,024 = 16,384. |
+| **~275,000** | steps in the run | 4.5 billion tokens ÷ 16,384 tokens per step ≈ 275,000, so the model reads the whole dataset about once. |
 
-These are the numbers for the first, 34M model. The bigger `big` run uses width **768**, **12** layers, **12** heads (still 64 numbers per head), a **1,024**-token context and **~98 million** parameters. Its size is set with `--width`, `--layers`, `--heads` and `--context` in `train.py`. Chapter 6 compares the two side by side.
+> 📌 **Why ~98 million knobs?** There is no magic in the number. It is just every adjustable number in the model, counted up: the token table (16,384 tokens × 768 numbers = 12,582,912), the position table (1,024 positions × 768 numbers = 786,432), and 12 identical-shaped blocks of 7,084,800 each (85,017,600 in total), plus about 1,500 in the final LayerNorm. 12,582,912 + 786,432 + 85,017,600 + 1,536 = **98,388,480**. Making the model wider (a bigger 768) or deeper (more than 12 blocks) is how it gets more knobs.
+
+**This guide uses the `big` run's numbers everywhere** (width 768, 12 layers, 12 heads, context 1,024, ~98M knobs), and repeats them in a short reminder box at the start of each chapter so you don't have to scroll back. The first, smaller model (the `full` run) had width 512, 8 layers, 8 heads, a 512-token context and ~98M knobs; it is only mentioned where noted. The sizes are set with `--width`, `--layers`, `--heads` and `--context` in `train.py`. Chapter 6 compares the two side by side.
 
 **The hardware:** one RTX 4070 Ti graphics card (12 GB of memory). The model size was picked so it trains on that card in a reasonable time.
 
@@ -136,6 +138,9 @@ These are the numbers for the first, 34M model. The bigger `big` run uses width 
 # PART 1: The Big Idea
 
 ## Chapter 1: What is a language model?
+
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
 
 > 🧒 **ELI5:** A language model is a program that reads some words and guesses what word comes next. That's all it does. To write a sentence, it guesses one word, adds it to the end, and then guesses the next one, again and again.
 
@@ -197,6 +202,9 @@ Your model is a **GPT**: **G**enerative **P**re-trained **T**ransformer.
 
 ## Chapter 2: The math toolkit (only what you need)
 
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
+
 > 🧒 **ELI5:** A vector is a list of numbers. A matrix is a grid of numbers. Multiplying a list by a grid gives you a new list. A derivative tells you: if this number goes up a little, does that other number go up or down, and by how much? That's all the math you need.
 
 You need five ideas. Each one is small.
@@ -205,7 +213,7 @@ You need five ideas. Each one is small.
 
 A **vector** is a list of numbers, like `[0.2, -1.5, 3.0]`. Its **size** (or **dimension**) is how many numbers it has. That one has size 3.
 
-In your model, every token is represented as a vector of **512 numbers**. That size is the model's **width** (`width` in `model.py`); the bigger `big` run uses a width of 768. You can think of it as a "personality profile" for that token, where each number measures some trait. Nobody chooses the traits; the model learns them.
+In your model, every token is represented as a vector of **768 numbers**. That size is the model's **width** (`width` in `model.py`). You can think of it as a "personality profile" for that token, where each number measures some trait. Nobody chooses the traits; the model learns them.
 
 ### 2.2 Matrices and matrix multiplication
 
@@ -296,7 +304,7 @@ To read one value, you give one position per dimension, counting from 0. In the 
 | 3 | `(2, 1024, 768)` | a batch of text going through the model | 2 chunks of text, 1,024 tokens each, 768 numbers per token |
 | 4 | `(2, 12, 1024, 1024)` | attention scores | 2 chunks, 12 heads, and for each of 1,024 tokens, a score for each of 1,024 tokens |
 
-The shapes above use the settings of the bigger `big` run (width 768, context 1,024, 12 heads), so that no two letters share the same value. The original 34M model used 512 for both width and context, which made them easy to mix up. Check the token table: `16,384 × 768 = 12,582,912` numbers. That's one shape, and you already know how big it is.
+The shapes above use this guide's `big` run settings (width 768, context 1,024, 12 heads), so that no two letters share the same value. (The first, smaller model used 512 for both width and context, which made them easy to mix up.) Check the token table: `16,384 × 768 = 12,582,912` numbers. That's one shape, and you already know how big it is.
 
 **Shape letters used in this guide (and in `model.py`):**
 
@@ -495,9 +503,9 @@ height: 10  →  2.4² + 0.8² = 5.76 + 0.64 = 6.4      (downhill!)
 ```
 Notice that the step moved `x` (the steep direction) more than `y` (the gentle one). Each input moves in proportion to its own slope. Section 3.3 keeps walking from here.
 
-#### From 2 knobs to 34 million
+#### From 2 knobs to 98 million
 
-The bowl has 2 inputs, so you can picture it in 3D. Your model has about 34 million knobs, so its loss landscape has 34 million "ground" directions plus one for height. Nobody can picture that, but the math is identical: the gradient is an arrow with 34 million numbers, each one saying "this knob: push this way, this hard", and the negative gradient is still the steepest way down. Chapter 3 walks down this landscape, and Chapter 14 shows how to compute those 34 million numbers efficiently.
+The bowl has 2 inputs, so you can picture it in 3D. Your model has about 98 million knobs, so its loss landscape has 98 million "ground" directions plus one for height. Nobody can picture that, but the math is identical: the gradient is an arrow with 98 million numbers, each one saying "this knob: push this way, this hard", and the negative gradient is still the steepest way down. Chapter 3 walks down this landscape, and Chapter 14 shows how to compute those 98 million numbers efficiently.
 
 > 💡 **Key idea:** A derivative is the slope of a curve: "nudge this, and that changes by this much." A gradient collects one slope per input and points up the steepest hill, so stepping *against* it is the steepest way down. Training is entirely about computing these slopes for every knob and stepping downhill.
 
@@ -513,6 +521,9 @@ The bowl has 2 inputs, so you can picture it in 3D. Your model has about 34 mill
 
 ## Chapter 3: How machines learn
 
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
+
 > 🧒 **ELI5:** The model is full of numbers that can be changed. At first they're random, so its guesses are bad. We measure how bad a guess was. Then we change each number a tiny bit so the next guess is a little less bad. We repeat this many thousands of times, and the guesses get good.
 
 ### 3.1 Knobs
@@ -523,7 +534,7 @@ Tiny example: a "model" with one knob, `w`:
 ```
 guess = w × x
 ```
-If `w = 3` and `x = 2`, the guess is 6. Change the knob and the guess changes. Your real model is the same idea with **about 34 million knobs**.
+If `w = 3` and `x = 2`, the guess is 6. Change the knob and the guess changes. Your real model is the same idea with **about 98 million knobs** (12.6M in the token table, 0.8M in the position table and about 85M in the 12 blocks; Section 12.4 counts them exactly).
 
 **Why call them knobs?** Because of what you're allowed to do with them. `x` is the input: it's given to you, you can't change it. `w` is yours to set, and the only thing you ever do to it is turn it up or down a little. That's all "knob" means here: a number you can turn up or down. Training never adds knobs, removes them, or rewires anything. It only turns the same knobs, again and again.
 
@@ -546,7 +557,7 @@ Things to notice:
 - **Many settings can give the right answer.** With one example to match, there's no single "correct" pair. Real training shows the model millions of examples, and the knobs have to end up working for all of them at once, which narrows things down a lot.
 - **You can't set each knob on its own.** The best `b` depends on where `a` is, and the other way round. That's why training nudges all the knobs a little at a time, instead of finishing one knob and moving to the next.
 
-The real model is this with 34 million knobs: one long formula, a lot of multiplying and adding, and every one of those numbers can be turned up or down.
+The real model is this with 98 million knobs: one long formula, a lot of multiplying and adding, and every one of those numbers can be turned up or down.
 
 ### 3.2 Loss: grading the guess
 
@@ -587,14 +598,14 @@ So the loss depends on `w`, just one step removed. The question training asks ab
 - the knobs are the inputs: many numbers
 - the gradient is one slope per knob, lined up in a list
 
-So the loss is 1 number, but the gradient has as many entries as there are knobs: 2 in the bowl from Section 2.5 (height `x² + y²` is one number, its gradient `[2x, 2y]` has two), and about 34 million in the real model. It has exactly the same shape as the knobs, and each slope sits in the same place as the knob it belongs to, which is how the update below knows which slope goes with which knob. The gradient is also different at every knob setting, so "the gradient" always means "the gradient at the knobs' current values".
+So the loss is 1 number, but the gradient has as many entries as there are knobs: 2 in the bowl from Section 2.5 (height `x² + y²` is one number, its gradient `[2x, 2y]` has two), and about 98 million in the real model. It has exactly the same shape as the knobs, and each slope sits in the same place as the knob it belongs to, which is how the update below knows which slope goes with which knob. The gradient is also different at every knob setting, so "the gradient" always means "the gradient at the knobs' current values".
 
-**Each knob is one dimension.** Write all the knobs in one long list and that list is a vector: `[a, b]` has 2 dimensions, the real model's knobs have about 34 million. The gradient is a vector with the same dimensions, in the same order: `[slope for a, slope for b]`. So knob number 7 and slope number 7 always belong together, and the update goes down both lists one position at a time:
+**Each knob is one dimension.** Write all the knobs in one long list and that list is a vector: `[a, b]` has 2 dimensions, the real model's knobs have about 98 million. The gradient is a vector with the same dimensions, in the same order: `[slope for a, slope for b]`. So knob number 7 and slope number 7 always belong together, and the update goes down both lists one position at a time:
 ```
 new a = a − learning_rate × (slope for a)
 new b = b − learning_rate × (slope for b)
 ```
-This is also what "a landscape with 34 million directions" (Section 2.5) means: each knob is one direction you can move in, and its slope says how steep the ground is in that direction.
+This is also what "a landscape with 98 million directions" (Section 2.5) means: each knob is one direction you can move in, and its slope says how steep the ground is in that direction.
 
 In the code the knobs aren't stored as one long list. They're kept as many separate matrices (the embedding table, each Linear layer's weights, and so on), and each has a gradient matrix of the same shape (Chapter 15's rule "`dX` has the same shape as `X`"). Laid end to end, those matrices are the one long vector.
 - Negative: turning the knob up lowers the loss, so turn it up.
@@ -603,7 +614,7 @@ In the code the knobs aren't stored as one long list. They're kept as many separ
 
 Two things that aren't obvious:
 - **The answer changes as you go.** At `w = 3`, turning `w` up helps a lot. At `w = 5`, it doesn't help at all. So you have to ask again after every step (more on this below).
-- **Every knob gets its own answer, all at once.** In the real model the chain is longer (`34 million knobs → many layers → a score for every possible next token → loss`), but each knob still affects the loss only by passing through the steps after it. Backpropagation (Chapter 14) works out all 34 million answers in one backward sweep, instead of nudging each knob one at a time.
+- **Every knob gets its own answer, all at once.** In the real model the chain is longer (`98 million knobs → many layers → a score for every possible next token → loss`), but each knob still affects the loss only by passing through the steps after it. Backpropagation (Chapter 14) works out all 98 million answers in one backward sweep, instead of nudging each knob one at a time.
 
 Picture the loss as a **landscape**. Every possible knob setting is a location, and the loss is the height. Training = **getting to the lowest valley**.
 
@@ -682,6 +693,9 @@ Your project uses a *changing* learning rate (Chapter 17.6).
 
 ## Chapter 4: Tokenization
 
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
+
 > 🧒 **ELI5:** Computers can only work with numbers, not words. So we split text into small pieces called tokens, and each token gets an ID number. A common word is usually one token. A rare word is split into a few smaller tokens.
 
 ### 4.1 Why we need it
@@ -696,7 +710,7 @@ The model only does math on numbers, so text must become numbers. The tool that 
 
 | Method | Example for "unhappiness" | Vocabulary size | Problem |
 |---|---|---|---|
-| Characters | `u n h a p p i n e s s` (11 tokens) | tiny (~100) | sequences get very long; the 512-token window holds little text |
+| Characters | `u n h a p p i n e s s` (11 tokens) | tiny (~100) | sequences get very long; the 1,024-token window holds little text |
 | Whole words | `unhappiness` (1 token) | enormous (millions) | any word not in the list is unknown; "skibidi" breaks it |
 | **Subwords** ✔ | `un happiness` (2 tokens) | you choose (16,384 here) | none of the above. Common words are 1 token, rare words are a few pieces |
 
@@ -875,6 +889,9 @@ Two important consequences:
 
 ## Chapter 5: The data pipeline
 
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
+
 > 🧒 **ELI5:** We download Wikipedia. We delete the parts that aren't useful, like reference lists. We turn all the text into token IDs and save them. We keep about 1 in 100 articles aside and never train on them, so we can test the model on text it hasn't seen.
 
 > 📁 **In the code:** `prepare.py`, `cleaning.py`
@@ -905,28 +922,31 @@ train.bin:  [464, 3797, 3332, ..., 1(<eos>), 818, 2231, ..., 1(<eos>), ...]
 
 ## Chapter 6: The model at a glance
 
-> 🧒 **ELI5:** Token IDs go in. Each ID is turned into a list of numbers. Those lists go through 8 layers in a row, and each layer changes them a little. At the end, the model gives a score to every possible next token. The highest score is its best guess.
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
+
+> 🧒 **ELI5:** Token IDs go in. Each ID is turned into a list of numbers. Those lists go through 12 layers in a row, and each layer changes them a little. At the end, the model gives a score to every possible next token. The highest score is its best guess.
 
 Here's the whole GPT. Don't worry about the details yet. Each box gets its own chapter.
 
 ```
- token IDs                            shape (b, t)          e.g. (2, 512)
+ token IDs                            shape (b, t)          e.g. (2, 1024)
      │
      ▼
  ┌──────────────────────────────┐
- │ Token embedding  (Ch. 7)     │    look up 512 numbers per token
+ │ Token embedding  (Ch. 7)     │    look up 768 numbers per token
  │   + Position embedding       │    add "where am I in the sentence"
- └──────────────────────────────┘    shape (b, t, 512)
+ └──────────────────────────────┘    shape (b, t, 768)
      │
      ▼
  ┌──────────────────────────────┐ ┐
  │ LayerNorm (Ch. 10)           │ │
  │ Attention (Ch. 11)           │ │
  │ + residual (Ch. 12)          │ │  one "Block"
- │ LayerNorm                    │ │  repeated 8 times
+ │ LayerNorm                    │ │  repeated 12 times
  │ MLP: Linear→GELU→Linear      │ │  (each block has its own knobs)
  │ + residual                   │ │
- └──────────────────────────────┘ ┘   shape stays (b, t, 512)
+ └──────────────────────────────┘ ┘   shape stays (b, t, 768)
      │
      ▼
  ┌──────────────────────────────┐
@@ -940,23 +960,23 @@ Here's the whole GPT. Don't worry about the details yet. Each box gets its own c
 
 > 📁 **In the code:** the entire model is 43 lines in `model.py`.
 
-Important: the model predicts the next token **at every position at once**. Feed it 512 tokens and you get 512 predictions: what follows token 1, what follows tokens 1–2, what follows tokens 1–3, and so on. That's very efficient for training.
+Important: the model predicts the next token **at every position at once**. Feed it 1,024 tokens and you get 1,024 predictions: what follows token 1, what follows tokens 1–2, what follows tokens 1–3, and so on. That's very efficient for training.
 
 > 🖥️ **See it on the dashboard: "01 / The forward pass"**
 >
 > The row of boxes, `Embedding → Block 1 → Block 2 → …`, is the diagram above turned sideways. The **forward pass** is the trip your token IDs take, left to right, to become a prediction. Click a box to see what that stage does and how many knobs it holds.
 >
-> The diagram above shows the original 34M model. The bigger model trained later (the `big` run) has the **same design, only larger**:
+> The diagram above shows this guide's model (the `big` run). The first, smaller model (the `full` run) has the **same design, only smaller**:
 >
-> | | Original (`full` run) | Bigger (`big` run) |
+> | | This guide (`big` run) | First model (`full` run) |
 > |---|---|---|
-> | Numbers per token (width) | 512 | 768 |
-> | Blocks | 8 | 12 |
-> | Attention heads per block | 8 (64 numbers each) | 12 (64 numbers each) |
-> | Context (max tokens) | 512 | 1,024 |
-> | Total knobs | 33.9 M | 98.4 M |
+> | Numbers per token (width) | 768 | 512 |
+> | Blocks | 12 | 8 |
+> | Attention heads per block | 12 (64 numbers each) | 8 (64 numbers each) |
+> | Context (max tokens) | 1,024 | 512 |
+> | Total knobs | 98.4 M | 33.9 M |
 >
-> So when the dashboard's Embedding box says **"768 dimensions"** and **"12,582,912 token + 786,432 position parameters"**, it's showing the big model:
+> So when the dashboard's Embedding box says **"768 dimensions"** and **"12,582,912 token + 786,432 position parameters"**, it's showing this guide's model:
 >
 > - 12,582,912 = 16,384 tokens × 768 numbers each.
 > - 786,432 = 1,024 positions × 768 numbers each.
@@ -966,13 +986,16 @@ Important: the model predicts the next token **at every position at once**. Feed
 
 ## Chapter 7: Embeddings, turning IDs into vectors
 
-> 🧒 **ELI5:** The model has a table with one row per token. Each row is a list of 512 numbers. To read a token, the model looks up its row. It also adds numbers from a second table that say where the token is in the sentence (1st, 2nd, 3rd...), because word order matters.
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
+
+> 🧒 **ELI5:** The model has a table with one row per token. Each row is a list of 768 numbers. To read a token, the model looks up its row. It also adds numbers from a second table that say where the token is in the sentence (1st, 2nd, 3rd...), because word order matters.
 
 An ID like `3797` is just a label. The number 3797 isn't "bigger" than 464 in any meaningful way. So each ID is used to **look up a row** in a table.
 
 ### 7.1 Token embedding
 
-A table with **16,384 rows** (one per token) and **512 columns**. Token 3797 → grab row 3797 → a vector of 512 numbers.
+A table with **16,384 rows** (one per token) and **768 columns**. Token 3797 → grab row 3797 → a vector of 768 numbers.
 
 Tiny example with a vocabulary of 4 and a width of 3:
 ```
@@ -987,7 +1010,7 @@ The table starts **random**. Through training, tokens with similar meanings ("ca
 
 ### 7.2 Position embedding
 
-Without help, the model can't tell `"dog bites man"` from `"man bites dog"`: same tokens, same vectors. So there's a **second table** with one row per **position** (512 rows × 512 columns). Position 0 gets row 0, position 1 gets row 1, and so on. These are **added** to the token vectors:
+Without help, the model can't tell `"dog bites man"` from `"man bites dog"`: same tokens, same vectors. So there's a **second table** with one row per **position** (1,024 rows × 768 columns). Position 0 gets row 0, position 1 gets row 1, and so on. These are **added** to the token vectors:
 
 ```
 x = token_embedding[id] + position_embedding[position]
@@ -1002,11 +1025,14 @@ x = token_embedding[id] + position_embedding[position]
 
 > **Q: How many knobs are in the token embedding table? In the position table?**
 >
-> A: Token table: `16,384 × 512 = 8,388,608`. Position table: `512 × 512 = 262,144`.
+> A: Token table: `16,384 × 768 = 12,582,912`. Position table: `1,024 × 768 = 786,432`.
 
 ---
 
 ## Chapter 8: The Linear layer
+
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
 
 > 🧒 **ELI5:** A Linear layer takes a list of numbers and makes a new list. Each new number is made by multiplying every old number by its own weight and adding them all up. Training changes those weights.
 
@@ -1020,7 +1046,7 @@ y = x @ W.T + b
 - `b`: a bias vector of shape `(out,)`, more knobs (an adjustable "offset").
 - Every output is a weighted mix of every input.
 
-**The same `W` is applied to every token position independently.** If x is `(b, t, 512)` and W is `(2048, 512)`, then y is `(b, t, 2048)`, so every one of the b×t token vectors went through the same mixer.
+**The same `W` is applied to every token position independently.** If x is `(b, t, 768)` and W is `(3072, 768)`, then y is `(b, t, 3072)`, so every one of the b×t token vectors went through the same mixer.
 
 > 📁 **In the code:** `nn.Linear(width, 4 * width)` and similar in `model.py`. Note `bias=False` on the attention linears: they skip the bias.
 
@@ -1029,6 +1055,9 @@ y = x @ W.T + b
 ---
 
 ## Chapter 9: Activation functions (GELU)
+
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
 
 > 🧒 **ELI5:** Multiplying and adding alone can only make straight-line patterns, no matter how many layers you stack. GELU is a simple function applied to every number: positive numbers mostly stay the same, and negative numbers get pushed close to zero. That small change lets the model learn more complicated patterns.
 
@@ -1070,6 +1099,9 @@ It's like a dimmer switch: big positive values pass almost unchanged, big negati
 
 ## Chapter 10: LayerNorm
 
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
+
 > 🧒 **ELI5:** After many layers, the numbers can get too big or too small, and that makes training unstable. LayerNorm fixes this by adjusting each list of numbers so that its average is 0 and the numbers are spread out by about 1.
 
 ### 10.1 The problem
@@ -1101,6 +1133,9 @@ With gamma = 1 and beta = 0 (their starting values), `y = xhat`. The relative pa
 ---
 
 ## Chapter 11: Attention, the heart of the transformer
+
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
 
 > 🧒 **ELI5:** Each word needs information from other words. For example, to understand "it" in a sentence, the model needs to know what "it" refers to. Attention lets each word look at all the words before it, score how relevant each one is, and take in information mostly from the high-scoring ones. This is the only step where words share information with each other.
 
@@ -1181,7 +1216,7 @@ token 4:         ✓   ✓   ✓   ✓
 
 ### 11.5 Multiple heads
 
-Instead of one attention with width 512, the model runs **8 attentions in parallel** (8 **heads**), each on a 64-number slice. Their outputs are glued back together (8 × 64 = 512) and passed through one more Linear layer, the **projection**. The rest of this section breaks that down step by step.
+Instead of one attention with width 768, the model runs **12 attentions in parallel** (12 **heads**), each on a 64-number slice. Their outputs are glued back together (12 × 64 = 768) and passed through one more Linear layer, the **projection**. The rest of this section breaks that down step by step.
 
 #### The problem: one attention can only ask one question
 
@@ -1191,14 +1226,14 @@ In 11.2, each token makes one Query and compares it against every earlier token'
 
 To understand "it", the model may want to know *which noun it refers to* (trophy or suitcase), *what kind of word comes next* (an adjective like "big"), and *where we are in the sentence*. One set of weights has to compromise between all of those. With several heads, each one gets its own set of weights, so each can listen to different tokens for a different reason.
 
-#### Step 1: cut the vector into 8 slices
+#### Step 1: cut the vector into 12 slices
 
-Each token's vector has 512 numbers. Cut it into 8 equal slices of 64, like cutting a row of 512 beads into 8 groups of 64:
+Each token's vector has 768 numbers. Cut it into 12 equal slices of 64, like cutting a row of 768 beads into 12 groups of 64:
 
 ```
-one token's vector (512 numbers)
-[ 64 | 64 | 64 | 64 | 64 | 64 | 64 | 64 ]
-  h0   h1   h2   h3   h4   h5   h6   h7
+one token's vector (768 numbers)
+[ 64 | 64 | 64 | 64 | 64 | 64 | 64 | 64 | 64 | 64 | 64 | 64 ]
+  h0   h1   h2   h3   h4   h5   h6   h7   h8   h9   h10  h11
 ```
 
 Head 0 works on the first 64 numbers, head 1 on the next 64, and so on. (In the code, Q, K and V are each cut this way, so every head gets its own 64-number Q, K and V per token.)
@@ -1211,19 +1246,20 @@ Because each head has its own Q/K/V weights, each is free to learn different wei
 
 #### Step 3: glue the heads back together
 
-Each head hands back 64 numbers for the token. Putting the 8 results side by side gives 8 × 64 = 512 numbers again, the same width we started with:
+Each head hands back 64 numbers for the token. Putting the 12 results side by side gives 12 × 64 = 768 numbers again, the same width we started with:
 
 ```
-head 0 out (64) | head 1 out (64) | ... | head 7 out (64)   →   512 numbers
+head 0 out (64) | head 1 out (64) | ... | head 11 out (64)   →   768 numbers
 ```
 
 #### Step 4: the projection mixes them
 
-Right after gluing, the 512 numbers are still just 8 separate blocks, and nothing has combined what head 0 found with what head 1 found. The **projection** (`self.proj`, a Linear layer, 512 → 512) fixes this: every output number is a weighted sum of *all* 512 inputs, so information from different heads gets blended into the final result.
+Right after gluing, the 768 numbers are still just 12 separate blocks, and nothing has combined what head 0 found with what head 1 found. The **projection** (`self.proj`, a Linear layer, 768 → 768) fixes this: every output number is a weighted sum of *all* 768 inputs, so information from different heads gets blended into the final result.
 
 #### What do the heads actually learn?
 
-Nobody assigns jobs to heads. All 8 start with random weights and training pushes each one toward whatever helps lower the loss. In practice, researchers who inspect trained transformers find heads that do things like "look at the previous token", "look back at an earlier repeat of this word", or "attend to the start of the sentence", but many heads are messier and don't have a neat label. Treat examples like "this head tracks pronouns" as illustrations of what's *possible*, not a guarantee about this particular model.
+Nobody assigns jobs to heads. All 12 start with random weights and training pushes each one toward whatever helps lower the loss. In practice, researchers who inspect trained transformers find heads that do things like "look at the previous token", "look back at an earlier repeat of this word", or "attend to the start of the sentence", but many heads are messier and don't have a neat label. Treat examples like "this head tracks pronouns" as illustrations of what's *possible*, not a guarantee about this particular model.
+
 #### Attention patterns: seeing what a head looks at
 
 An **attention pattern** is the grid of attention weights one head produces for one piece of text: row = the token doing the looking, column = the token being looked at, and each cell is how much weight the row token puts on the column token. Each row sums to 1 (it's a softmax), and because of the causal mask everything above the diagonal is 0. Researchers plot these as heatmaps to understand what a model is doing. It is the main way people look inside a transformer.
@@ -1253,17 +1289,17 @@ Some common shapes that people find in real models:
 | **Repeat / induction** | stripe pointing to the token *after* an earlier copy of the current word | helps the model copy patterns it saw earlier in the text |
 | **Broad / diffuse** | weights spread thinly over many tokens | averages over a lot of context, like a summary |
 
-There is one pattern per head, per layer, per piece of text, so the full set for an 8-layer, 8-head model on a 512-token chunk is 64 grids of 512 × 512. These are the `(b, h, t, t)` attention scores from earlier, after the softmax.
+There is one pattern per head, per layer, per piece of text, so the full set for a 12-layer, 12-head model on a 1,024-token chunk is 144 grids of 1,024 × 1,024. These are the `(b, h, t, t)` attention scores from earlier, after the softmax.
 
 **Caveats.** An attention pattern shows where a head *reads from*, not what it *does* with what it reads: the Values and the later layers still matter. So a pattern is a useful clue, not a full explanation, and many heads have no clean label.
 
 > 📌 **In this project:** nothing here extracts or plots attention patterns. `F.scaled_dot_product_attention` computes the weights internally and returns only the final mixed output, so the `t × t` grid is never kept. Seeing the patterns would need extra code, such as writing attention by hand (like the handwritten version in Chapter 15) so the grid can be saved and plotted.
 
-#### Why 8 small heads instead of 1 big one?
+#### Why 12 small heads instead of 1 big one?
 
-The cost is about the same. 8 heads of width 64 do roughly the same amount of arithmetic as one head of width 512, since each head's slice is 8× smaller. So splitting is nearly free, but it gives the model 8 independent attention patterns per layer instead of 1. With 8 layers, that's 64 heads in the 34M model.
+The cost is about the same. 12 heads of width 64 do roughly the same amount of arithmetic as one head of width 768, since each head's slice is 12× smaller. So splitting is nearly free, but it gives the model 12 independent attention patterns per layer instead of 1. With 12 layers, that's 144 heads in the model.
 
-> 💡 **In one line:** a head is one independent attention run on a 64-number slice of each token. 8 heads means 8 different ways of deciding who to look at, glued together and mixed by the projection.
+> 💡 **In one line:** a head is one independent attention run on a 64-number slice of each token. 12 heads means 12 different ways of deciding who to look at, glued together and mixed by the projection.
 
 ### 11.6 In the code
 
@@ -1276,9 +1312,9 @@ The cost is about the same. 8 heads of width 64 do roughly the same amount of ar
 > ```
 
 Line by line:
-- `self.qkv(...)` is **one** Linear layer producing Q, K and V together: `(b, t, 512) → (b, t, 1536)`.
-- `.view(b, t, 3, 8, 64)` cuts those 1536 numbers into 3 (q/k/v) × 8 heads × 64.
-- `.permute(2, 0, 3, 1, 4)` reorders the dimensions to `(3, b, 8, t, 64)` so each head is its own little attention problem.
+- `self.qkv(...)` is **one** Linear layer producing Q, K and V together: `(b, t, 768) → (b, t, 2304)`.
+- `.view(b, t, 3, 12, 64)` cuts those 2304 numbers into 3 (q/k/v) × 12 heads × 64.
+- `.permute(2, 0, 3, 1, 4)` reorders the dimensions to `(3, b, 12, t, 64)` so each head is its own little attention problem.
 - `F.scaled_dot_product_attention` (**SDPA**) does steps 1–4 from 11.2, fast. `is_causal=True` applies the mask.
 - `.transpose(...).view(b, t, c)` glues the heads back together, and `self.proj` mixes them.
 - `x + ...` is a residual connection (next chapter).
@@ -1297,6 +1333,9 @@ Line by line:
 
 ## Chapter 12: MLP, residuals, and the full block
 
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
+
 > 🧒 **ELI5:** The MLP is two Linear layers with GELU in between. It works on each word by itself, after attention has given that word information from the other words. A residual connection means each layer's result is added to its input instead of replacing it, so information from earlier layers isn't lost.
 
 ### 12.1 The MLP: thinking about what you gathered
@@ -1304,7 +1343,7 @@ Line by line:
 **MLP** = **M**ulti-**L**ayer **P**erceptron (an old name for "a few linear layers with activations in between"). In each block:
 
 ```
-512 numbers → Linear → 2048 numbers → GELU → Linear → 512 numbers
+768 numbers → Linear → 3072 numbers → GELU → Linear → 768 numbers
 ```
 
 It widens 4×, squishes, and narrows back. Attention *moves* information between tokens. The MLP *processes* it within each token. Research suggests a lot of a model's factual knowledge is stored in these MLP weights.
@@ -1334,9 +1373,9 @@ Instead of `x = layer(x)`, every block does:
 ```
 x = x + layer(x)
 ```
-The layer only has to learn a **correction** to add, not rebuild everything from scratch. Think of 8 editors each making small notes on the same document, instead of each one rewriting it.
+The layer only has to learn a **correction** to add, not rebuild everything from scratch. Think of 12 editors each making small notes on the same document, instead of each one rewriting it.
 
-There's a second big benefit you'll see in Chapter 14: during backprop, the `+` acts as a **highway**. The learning signal can flow straight back through all 8 blocks without fading out.
+There's a second big benefit you'll see in Chapter 14: during backprop, the `+` acts as a **highway**. The learning signal can flow straight back through all 12 blocks without fading out.
 
 ### 12.3 One complete block
 
@@ -1349,46 +1388,40 @@ x2 = x1 + MLP(h2)                ← residual #2
 ```
 This "normalize, then do the thing, then add back" pattern is called **pre-norm**.
 
-### 12.4 Where the 34 million knobs live
+### 12.4 Where the 98 million knobs live
 
 | Part | Shape | Knobs |
 |---|---|---|
-| Token embedding | 16,384 × 512 | 8,388,608 |
-| Position embedding | 512 × 512 | 262,144 |
+| Token embedding | 16,384 × 768 | 12,582,912 |
+| Position embedding | 1,024 × 768 | 786,432 |
 | **Per block:** | | |
-| · QKV linear | 1,536 × 512 | 786,432 |
-| · Projection | 512 × 512 | 262,144 |
-| · MLP linear 1 (+bias) | 2,048 × 512 + 2,048 | 1,050,624 |
-| · MLP linear 2 (+bias) | 512 × 2,048 + 512 | 1,049,088 |
-| · 2 LayerNorms (gamma+beta) | 4 × 512 | 2,048 |
-| · **Block total** | | **3,150,336** |
-| × 8 blocks | | 25,202,688 |
-| Final LayerNorm | 2 × 512 | 1,024 |
+| · QKV linear | 2,304 × 768 | 1,769,472 |
+| · Projection | 768 × 768 | 589,824 |
+| · MLP linear 1 (+bias) | 3,072 × 768 + 3,072 | 2,362,368 |
+| · MLP linear 2 (+bias) | 768 × 3,072 + 768 | 2,360,064 |
+| · 2 LayerNorms (gamma+beta) | 4 × 768 | 3,072 |
+| · **Block total** | | **7,084,800** |
+| × 12 blocks | | 85,017,600 |
+| Final LayerNorm | 2 × 768 | 1,536 |
 | Output head | *shares* the token embedding | 0 |
-| **Total** | | **33,854,464 ≈ 34 M** |
+| **Total** | | **98,388,480 ≈ 98 M** |
 
-The bigger `big` model uses the same formulas with width 768, 12 blocks and 1,024 positions:
+Most of the knobs sit in the blocks: 85 M of the 98 M (about 86%). The embeddings are only about 13.4 M. A wider or deeper model gets its extra "brain" mostly from bigger or more blocks.
 
-| Part | Knobs |
-|---|---|
-| Token embedding (16,384 × 768) | 12,582,912 |
-| Position embedding (1,024 × 768) | 786,432 |
-| Per block: QKV 1,769,472 + projection 589,824 + MLP 2,362,368 + 2,360,064 + LayerNorms 3,072 | 7,084,800 |
-| × 12 blocks | 85,017,600 |
-| Final LayerNorm | 1,536 |
-| **Total** | **98,388,480 ≈ 98 M** |
-
-Notice where the growth went. The blocks went from 25 M to 85 M knobs, while the embeddings grew only from 8.7 M to 13.4 M. Most of a bigger model's extra "brain" sits in its blocks.
+For comparison, the first, smaller model (width 512, 8 blocks, 512 positions) had 8,388,608 (token embedding) + 262,144 (position embedding) + 8 × 3,150,336 (blocks) + 1,024 (final LayerNorm) = 33,854,464 ≈ 34 M knobs. Same recipe, smaller numbers.
 
 ---
 
 ## Chapter 13: The output. Logits, softmax and the loss
 
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
+
 > 🧒 **ELI5:** The model gives each possible next token a score. Softmax turns the scores into chances that add up to 100%. The loss measures how much chance the model gave the correct token. More chance on the right answer means a lower loss, which is good.
 
 ### 13.1 Logits
 
-After the final LayerNorm, each position has a 512-number vector. To score every possible next token, the model compares that vector against **every row of the token embedding table** (dot product). That gives 16,384 raw scores, called **logits**. A higher logit means "more likely next".
+After the final LayerNorm, each position has a 768-number vector. To score every possible next token, the model compares that vector against **every row of the token embedding table** (dot product). That gives 16,384 raw scores, called **logits**. A higher logit means "more likely next".
 
 **Tied embeddings:** the *same* table is used to read tokens in and to score tokens out. That saves 8.4 million knobs and makes sense: a token's meaning vector is useful in both directions.
 
@@ -1440,17 +1473,20 @@ The loss for a whole batch is the **average** over all positions.
 
 ## Chapter 14: Backpropagation
 
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
+
 > 🧒 **ELI5:** Backpropagation works out, for every number in the model, how much it contributed to the error. It starts at the error and works backward through each step of the calculation, one step at a time. Those amounts are what tell us which way to change each number.
 
 This is the most important chapter. Take it slowly.
 
 ### 14.1 The problem
 
-After a forward pass, we have one number: the loss. We have 34 million knobs. For **each** knob we need its **gradient**: "if I nudge this knob up a bit, does the loss go up or down, and by how much?"
+After a forward pass, we have one number: the loss. We have 98 million knobs. For **each** knob we need its **gradient**: "if I nudge this knob up a bit, does the loss go up or down, and by how much?"
 
-The slow way: nudge each knob one at a time and re-run the whole model. That's 34 million forward passes for **one** training step. Impossible.
+The slow way: nudge each knob one at a time and re-run the whole model. That's 98 million forward passes for **one** training step. Impossible.
 
-**Backpropagation ("backprop")** gets *all* 34 million gradients for the cost of about **one extra pass** (roughly 2× a forward pass). It's the algorithm that makes deep learning possible.
+**Backpropagation ("backprop")** gets *all* 98 million gradients for the cost of about **one extra pass** (roughly 2× a forward pass). It's the algorithm that makes deep learning possible.
 
 ### 14.2 The chain rule
 
@@ -1543,7 +1579,7 @@ These cause most backprop bugs, so learn them now.
 Why: nudging x changes the output *through both paths*, so both effects count.
 
 **Rule 2: If a knob is used at many positions, its blames ADD.**
-The same weight matrix W is used for all 512 tokens. Each position contributes some gradient to W, and W's total gradient is the **sum** over all positions (and over the batch).
+The same weight matrix W is used for all 1,024 tokens. Each position contributes some gradient to W, and W's total gradient is the **sum** over all positions (and over the batch).
 
 In your model:
 - Residuals → Rule 1 (twice per block).
@@ -1575,6 +1611,9 @@ In Part 5 you'll replace that one line with your own code.
 ---
 
 ## Chapter 15: The backward rule for every layer
+
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
 
 > 🧒 **ELI5:** Each type of layer needs its own backward rule. The rule says: given how much this layer's output affected the error, here's how much each of its inputs and weights affected the error. Once every layer has its rule, you run them in reverse order, from the last layer to the first.
 
@@ -1765,6 +1804,9 @@ loss
 
 ## Chapter 16: Gradient checking (how to know your backprop is right)
 
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
+
 > 🧒 **ELI5:** To check your backpropagation, change one weight by a tiny amount and see how much the error really changes. Then compare that with what your code calculated. If the two numbers match, your code is correct.
 
 Backprop code can be *wrong* and still run. The loss might even go down, just slower. So you **must** check it. There are two ways.
@@ -1804,24 +1846,27 @@ It's slow (two forward passes per knob), so only spot-check a few knobs.
 
 ## Chapter 17: The training loop
 
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
+
 > 🧒 **ELI5:** Training repeats the same steps many times: take some text, let the model guess the next tokens, measure the error, use backpropagation to find how each weight affected it, and change the weights a little. Every so often, test the model on text it has never trained on to check it's really improving.
 
 > 📁 **In the code:** `train.py`, lines 129–167. Let's walk through each piece.
 
 ### 17.1 Making a batch: inputs and answers
 
-Grab **513** consecutive tokens. The input is tokens 1–512, the answers are tokens 2–513:
+Grab **1,025** consecutive tokens. The input is tokens 1–1,024, the answers are tokens 2–1,025:
 
 ```
 tokens:  [The] [cat] [sat] [on] [the] [mat]
 input:   [The] [cat] [sat] [on] [the]
 answer:  [cat] [sat] [on]  [the] [mat]
 ```
-One chunk of 512 tokens = **512 prediction quizzes** at once. (`train.py:97`: `return data[:, :-1], data[:, 1:]`)
+One chunk of 1,024 tokens = **1,024 prediction quizzes** at once. (`train.py:97`: `return data[:, :-1], data[:, 1:]`)
 
-**Batch:** process several chunks at once (`--batch 2`). The GPU (**G**raphics **P**rocessing **U**nit) is great at doing many things in parallel.
+**Batch:** process several chunks at once (`--batch`; the `big` run uses `--batch 16`). The GPU (**G**raphics **P**rocessing **U**nit) is great at doing many things in parallel.
 
-**Epoch:** one full pass through all the training data. The **block sampler** (`training_utils.py`) cuts `train.bin` into 512-token blocks and visits every block once per epoch, in a shuffled order.
+**Epoch:** one full pass through all the training data. The **block sampler** (`training_utils.py`) cuts `train.bin` into 1,024-token blocks and visits every block once per epoch, in a shuffled order.
 
 ### 17.2 Forward + loss + backward
 
@@ -1833,7 +1878,7 @@ loss.backward()      # ← backprop; fills every knob's .grad
 
 ### 17.3 Gradient accumulation
 
-The GPU's memory (**VRAM**, **V**ideo **RAM**; 12 GB on the RTX 4070 Ti) only fits 2 chunks at a time. But bigger batches give steadier, less noisy gradients. Solution:
+The GPU's memory (**VRAM**, **V**ideo **RAM**; 12 GB on the RTX 4070 Ti) limits how many chunks fit at once. Say only 2 fit. But bigger batches give steadier, less noisy gradients. Solution:
 
 ```python
 opt.zero_grad()                       # clear old gradients
@@ -1842,11 +1887,13 @@ for _ in range(8):                    # --accum 8
     (loss / 8).backward()             # gradients ADD into .grad
 opt.step()                            # one update using the summed gradient
 ```
-Result: identical to a batch of 16 chunks = **2 × 8 × 512 = 8,192 tokens per update step**. Dividing by 8 makes it an average instead of a sum.
+Result: identical to a batch of 16 chunks = **2 × 8 × 1,024 = 16,384 tokens per update step**. Dividing by 8 makes it an average instead of a sum.
+
+> 📌 **In the `big` run:** the same 16 chunks go through in one pass (`--batch 16 --accum 1`), so 16 × 1,024 = 16,384 tokens per step, the same total. Accumulation is the trick for when they *don't* all fit; the `train.py` default is `--batch 2 --accum 8`.
 
 ### 17.4 Gradient clipping
 
-Occasionally a weird batch produces a huge gradient that would throw the knobs far off course. **Clipping** measures the total length of the gradient (all 34M numbers treated as one long arrow). If it's longer than 1.0, it's scaled down to length 1.0, keeping the same direction:
+Occasionally a weird batch produces a huge gradient that would throw the knobs far off course. **Clipping** measures the total length of the gradient (all 98M numbers treated as one long arrow). If it's longer than 1.0, it's scaled down to length 1.0, keeping the same direction:
 ```python
 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 ```
@@ -1892,16 +1939,16 @@ Interesting fact: on step 1, Adam moves every knob by about **±lr**, regardless
      │  ╱                ╲____
 3e-5 ┤ ╱                      ╲________________________
      └┬────┬──────────────────────────────┬────────────► step
-      0   200                           10,000
+      0  2,000                         275,000
       warmup         cosine decay            (stays at min)
 ```
 
-| Step | 1 | 100 | 200 | 2,650 | 5,100 | 7,550 | 10,000 | 12,000 |
+| Step | 1 | 1,000 | 2,000 | 70,250 | 138,500 | 206,750 | 275,000 | 300,000 |
 |---|---|---|---|---|---|---|---|---|
-| LR | 1.5e-6 | 1.5e-4 | **3.0e-4** (peak) | 2.6e-4 | 1.65e-4 | 7.0e-5 | **3.0e-5** (min) | 3.0e-5 |
+| LR | 1.5e-7 | 1.5e-4 | **3.0e-4** (peak) | 2.6e-4 | 1.65e-4 | 7.0e-5 | **3.0e-5** (min) | 3.0e-5 |
 
-- **Warmup** (steps 0–200): the knobs start random and AdamW's averages are empty, so big steps right away could be chaotic. The LR ramps up gradually.
-- **Cosine decay** (200–10,000): slide down along half a cosine wave. Take big steps early to make fast progress, and small steps late to settle into a good spot.
+- **Warmup** (steps 0–2,000): the knobs start random and AdamW's averages are empty, so big steps right away could be chaotic. The LR ramps up gradually.
+- **Cosine decay** (2,000–275,000): slide down along half a cosine wave. Take big steps early to make fast progress, and small steps late to settle into a good spot.
 
 (The `e` notation: `3e-4` = 3 × 10⁻⁴ = 0.0003.)
 
@@ -1948,9 +1995,9 @@ It writes to a temporary file first and then renames it, so a crash mid-save can
 
 > 💡 **Key idea:** One training step = (accumulate gradients over several small batches) → clip → AdamW update with the scheduled learning rate. Do this thousands of times and check val loss along the way.
 
-> **Q: With `--batch 4 --accum 4 --context 512`, how many tokens are in one update step?**
+> **Q: With `--batch 4 --accum 4 --context 1024`, how many tokens are in one update step?**
 >
-> A: `4 × 4 × 512 = 8,192` tokens.
+> A: `4 × 4 × 1,024 = 16,384` tokens.
 >
 > **Q: Why does training start with a small learning rate (warmup) instead of the peak right away?**
 >
@@ -1959,6 +2006,9 @@ It writes to a temporary file first and then renames it, so a crash mid-save can
 ---
 
 ## Chapter 18: Generating text
+
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
 
 > 🧒 **ELI5:** To write text, the model picks the next token at random, but tokens with higher chances get picked more often. Temperature changes this: low temperature makes it almost always pick the most likely token, and high temperature makes less likely tokens get picked more often.
 
@@ -2064,11 +2114,14 @@ Even unlikely tokens have some tiny probability, and across 16,384 tokens those 
 
 ### 18.3 Context window
 
-The model can only see a fixed number of tokens: 512 for the original model, 1,024 for the `big` one. When the text gets longer, `generate.py` feeds only the **last** 512 or 1,024 (`x[:, -context:]`). The model completely forgets anything earlier.
+The model can only see a fixed number of tokens: 1,024 for this guide's model (the first, smaller one saw 512). When the text gets longer, `generate.py` feeds only the **last** 1,024 (`x[:, -context:]`). The model completely forgets anything earlier.
 
 ---
 
 ## Chapter 19: From text predictor to chat
+
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
 
 > 🧒 **ELI5:** After training on Wikipedia, the model can only continue text that looks like Wikipedia. To make it answer questions, we train it more on example conversations between a user and an assistant. It's the same next-word guessing, just practiced on conversations.
 
@@ -2095,6 +2148,9 @@ Same model, same backprop, same optimizer. Only the data and the grading mask ch
 # PART 5: Lab. Write backprop yourself
 
 ## Chapter 20: Recoding backprop, step by step
+
+> 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
+
 
 > 🧒 **ELI5:** Right now PyTorch does backpropagation automatically. In this chapter you write that part yourself, one layer at a time. After each layer, you check your answers against PyTorch's. When all layers match, you use your own code to train the model.
 
@@ -2250,7 +2306,7 @@ Train a tiny model (width 64, 2 layers, context 64) on a slice of `val.bin` for 
 | **Chain rule** | `dC/dA = dB/dA × dC/dB`. The math behind backprop. |
 | **Checkpoint** | A save file of the model and training state (`latest.pt`). |
 | **Clipping** | Capping the total gradient length (at 1.0 here). |
-| **Context (window)** | The maximum number of tokens the model sees at once (512). |
+| **Context (window)** | The maximum number of tokens the model sees at once (1,024). |
 | **CPU / GPU** | **C**entral / **G**raphics **P**rocessing **U**nit. The GPU does massive parallel math. |
 | **Cross-entropy** | The loss: `−log(probability of the correct token)`. |
 | **CUDA** | **C**ompute **U**nified **D**evice **A**rchitecture. NVIDIA's system for doing math on the GPU. |
@@ -2281,7 +2337,7 @@ Train a tiny model (width 64, 2 layers, context 64) on a slice of `val.bin` for 
 | **Momentum** | A running average of gradients used to smooth updates. |
 | **Optimizer** | The algorithm that updates knobs from gradients (AdamW). |
 | **Overfitting** | Memorizing the training data: train loss falls while val loss rises. |
-| **Parameters / weights** | The learned numbers ("knobs"). About 34 M here. |
+| **Parameters / weights** | The learned numbers ("knobs"). About 98 M here. |
 | **Pre-training** | The first, general training stage (Wikipedia). |
 | **Projection** | The Linear layer after attention that mixes the heads together. |
 | **PyTorch** | The Python deep-learning library used here. |
