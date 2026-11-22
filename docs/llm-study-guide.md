@@ -301,16 +301,16 @@ To read one value, you give one position per dimension, counting from 0. In the 
 | 0 | `()` | the loss, like `3.21` | one number |
 | 1 | `(768,)` | one token's vector | 768 numbers |
 | 2 | `(16384, 768)` | the whole token table | 16,384 tokens, 768 numbers each |
-| 3 | `(2, 1024, 768)` | a batch of text going through the model | 2 chunks of text, 1,024 tokens each, 768 numbers per token |
-| 4 | `(2, 12, 1024, 1024)` | attention scores | 2 chunks, 12 heads, and for each of 1,024 tokens, a score for each of 1,024 tokens |
+| 3 | `(16, 1024, 768)` | a batch of text going through the model | 16 chunks of text, 1,024 tokens each, 768 numbers per token |
+| 4 | `(16, 12, 1024, 1024)` | attention scores | 16 chunks, 12 heads, and for each of 1,024 tokens, a score for each of 1,024 tokens |
 
-The shapes above use this guide's `big` run settings (width 768, context 1,024, 12 heads), so that no two letters share the same value (width and context are different numbers). Check the token table: `16,384 × 768 = 12,582,912` numbers. That's one shape, and you already know how big it is.
+The shapes above use this guide's `big` run settings (batch 16, width 768, context 1,024, 12 heads), so that width and context are different numbers and you can tell them apart in a shape. Check the token table: `16,384 × 768 = 12,582,912` numbers. That's one shape, and you already know how big it is.
 
 **Shape letters used in this guide (and in `model.py`):**
 
 | Letter | Meaning | Value (`big` run) |
 |---|---|---|
-| `b` | **batch**: how many text chunks processed at once | 2 |
+| `b` | **batch**: how many text chunks processed at once | 16 |
 | `t` | **time**: how many tokens per chunk (position in the sentence) | up to 1,024 |
 | `c` | **channels**: the vector width per token | 768 |
 | `h` | **heads**: parallel attention units | 12 |
@@ -332,12 +332,12 @@ chunk 2: tokens 2048 – 2999   (shorter, 952 tokens)
 ```
 
 - A chunk is **not** a sentence or paragraph. It can start or end mid-sentence, because the cut is by token count, not by meaning.
-- The batch size `b = 2` means each training step takes 2 chunks and processes them in parallel. They are independent: tokens in one chunk never attend to tokens in another. The input shape `(b, t)` reads "2 chunks, 1,024 token ids each."
+- The batch size `b = 16` means each training step takes 16 chunks and processes them in parallel. They are independent: tokens in one chunk never attend to tokens in another. The input shape `(b, t)` reads "16 chunks, 1,024 token ids each."
 - At every position in a chunk the model predicts the next token, so one 1,024-token chunk gives 1,024 prediction exercises at once. Position 40 can only see tokens 0 to 40, never later ones.
 
 #### What each letter really means
 
-- **`b` (batch).** The GPU is much faster doing 2 chunks at once than 1 chunk twice, so training feeds several independent chunks of text together. They never talk to each other; `b` is just "how many parallel copies of the same work." Here `b = 2` because memory is limited. A bigger batch gives a smoother learning signal but costs more memory.
+- **`b` (batch).** The GPU is much faster doing 16 chunks at once than 1 chunk 16 times, so training feeds several independent chunks of text together. They never talk to each other; `b` is just "how many parallel copies of the same work." The `big` run uses `b = 16` (`--batch 16`), which is what fits in the graphics card's memory. A bigger batch gives a smoother learning signal but costs more memory.
 - **`t` (time).** The position along a chunk, `0` for the first token, `1` for the second, and so on. It's called "time" because text is read in order, like a sequence over time. `1,024` is the **context length**: the most tokens the model can look at in one go. Shorter chunks are padded or cut so every chunk in a batch has the same `t`.
 - **`c` (channels).** The length of the vector that represents one token. Each token starts as a row of 768 numbers (looked up in the token table) and keeps that width the whole way through the model. You can think of the 768 numbers as 768 "features" the model has learned to track about that token. Bigger `c` means a more expressive model and more parameters.
 - **`h` (heads).** The number of separate attention units that run side by side inside each block. You haven't met attention yet (Chapter 11), but all you need for now is this: attention is the step where each token looks at the earlier tokens in its chunk and pulls in information from them. Instead of doing that once with the full 768-number vector, the model does it **12 times at once**, each time on a different **slice** of the vector. Each of those 12 attention units is a **head**. `h` is simply that count, so `h = 12`. The expanded explanation is just below, and Section 11.5 goes through it step by step.
@@ -347,7 +347,7 @@ chunk 2: tokens 2048 – 2999   (shorter, 952 tokens)
 **How the letters fit together.** The shape changes as data moves through the model, but `b` and `t` stay fixed until the very end:
 
 ```
-token ids          (b, t)           2 × 1,024 whole numbers
+token ids          (b, t)           16 × 1,024 whole numbers
 after lookup       (b, t, c)        each id becomes a 768-number vector
 split into heads   (b, h, t, d)     12 heads, each seeing 64 of the 768 numbers
 attention scores   (b, h, t, t)     every token scored against every token
@@ -355,7 +355,7 @@ joined heads       (b, t, c)        back to 768 numbers per token
 final output       (b, t, V)        a score for each of 16,384 possible next tokens
 ```
 
-Sanity check with numbers: `b × t = 2 × 1,024 = 2,048` tokens per step, and the final output has `2,048 × 16,384 = 33,554,432` scores.
+Sanity check with numbers: `b × t = 16 × 1,024 = 16,384` tokens per step (the same 16,384 as in the nutshell table), and the final output has `16,384 × 16,384 = 268,435,456` scores.
 
 #### `h` and `d` in the shapes: splitting a vector into heads
 
@@ -375,10 +375,10 @@ Nothing is added or removed, it's the same 768 numbers regrouped, like pouring 7
 
 | Shape | Reading it |
 |---|---|
-| `(b, t, c)` = `(2, 1024, 768)` | 2 chunks, 1,024 tokens each, **one row of 768 numbers** per token |
-| `(b, h, t, d)` = `(2, 12, 1024, 64)` | 2 chunks, **12 heads**, 1,024 tokens each, **64 numbers** per token per head |
+| `(b, t, c)` = `(16, 1024, 768)` | 16 chunks, 1,024 tokens each, **one row of 768 numbers** per token |
+| `(b, h, t, d)` = `(16, 12, 1024, 64)` | 16 chunks, **12 heads**, 1,024 tokens each, **64 numbers** per token per head |
 
-Check that nothing is lost: `2 × 1,024 × 768 = 1,572,864` numbers before, and `2 × 12 × 1,024 × 64 = 1,572,864` after.
+Check that nothing is lost: `16 × 1,024 × 768 = 12,582,912` numbers before, and `16 × 12 × 1,024 × 64 = 12,582,912` after.
 
 So what is the point of regrouping? Each head then runs its own attention on only its own slice, completely independently of the other 11. Twelve independent runs means each token can decide who to look at in 12 different ways at once, instead of in just one. At the end, the 12 results (64 numbers each) are placed side by side to get back to 768 numbers, which is the `(b, h, t, d) → (b, t, c)` step.
 
@@ -593,6 +593,11 @@ With the one-knob model from 3.1 (`guess = w × 2`, correct answer 10):
 
 So the loss depends on `w`, just one step removed. The question training asks about each knob is: **if I turn this knob up a tiny bit, does the loss go up or down, and by how much?** That number is the knob's **slope** (its partial derivative: its slope with every other knob held still).
 
+What the sign of a knob's slope tells you:
+- Negative: turning the knob up lowers the loss, so turn it up.
+- Positive: turning the knob up raises the loss, so turn it down.
+- Close to zero: this knob barely matters right now, so leave it mostly alone.
+
 **What is the gradient *of*?** The loss is one number, so this can sound odd. The gradient doesn't describe the loss by itself; it describes how the loss **responds to each knob**. Its full name is "the gradient of the loss with respect to the knobs":
 - the loss is the output: 1 number
 - the knobs are the inputs: many numbers
@@ -608,9 +613,6 @@ new b = b − learning_rate × (slope for b)
 This is also what "a landscape with 98 million directions" (Section 2.5) means: each knob is one direction you can move in, and its slope says how steep the ground is in that direction.
 
 In the code the knobs aren't stored as one long list. They're kept as many separate matrices (the embedding table, each Linear layer's weights, and so on), and each has a gradient matrix of the same shape (Chapter 15's rule "`dX` has the same shape as `X`"). Laid end to end, those matrices are the one long vector.
-- Negative: turning the knob up lowers the loss, so turn it up.
-- Positive: turning the knob up raises the loss, so turn it down.
-- Close to zero: this knob barely matters right now, so leave it mostly alone.
 
 Two things that aren't obvious:
 - **The answer changes as you go.** At `w = 3`, turning `w` up helps a lot. At `w = 5`, it doesn't help at all. So you have to ask again after every step (more on this below).
@@ -838,7 +840,7 @@ Two important consequences:
 
 ### 4.7 This project's tokenizer
 
-> 📁 **In the code:** `prepare.py`, lines 51–58
+> 📁 **In the code:** `prepare.py`, lines 50–56
 > ```python
 > tok = Tokenizer(models.BPE(unk_token='<unk>'))
 > tok.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
@@ -925,12 +927,12 @@ train.bin:  [464, 3797, 3332, ..., 1(<eos>), 818, 2231, ..., 1(<eos>), ...]
 > 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
 
 
-> 🧒 **ELI5:** Token IDs go in. Each ID is turned into a list of numbers. Those lists go through 12 layers in a row, and each layer changes them a little. At the end, the model gives a score to every possible next token. The highest score is its best guess.
+> 🧒 **ELI5:** Token IDs go in. Each ID is turned into a list of numbers. Those lists go through 12 blocks in a row, and each block changes them a little. At the end, the model gives a score to every possible next token. The highest score is its best guess.
 
 Here's the whole GPT. Don't worry about the details yet. Each box gets its own chapter.
 
 ```
- token IDs                            shape (b, t)          e.g. (2, 1024)
+ token IDs                            shape (b, t)          e.g. (16, 1024)
      │
      ▼
  ┌──────────────────────────────┐
@@ -1008,7 +1010,7 @@ Without help, the model can't tell `"dog bites man"` from `"man bites dog"`: sam
 x = token_embedding[id] + position_embedding[position]
 ```
 
-> 📁 **In the code:** `model.py:41`
+> 📁 **In the code:** `model.py:42`
 > ```python
 > x = self.tokens(ids) + self.positions(torch.arange(ids.size(1), device=ids.device))
 > ```
@@ -1020,7 +1022,7 @@ x = token_embedding[id] + position_embedding[position]
 The position table has one row per position, so its row count is the **context length** (`t`): the most tokens the model can look at at once. 1,024 is not forced by any rule of math. It's a **setting you choose** (`--context 1024` in `train.py`), and it's a trade-off:
 
 - **Longer context = the model can use more text.** At 1,024 tokens it can read roughly a few paragraphs (a token is about three-quarters of a word) and use all of it to predict the next token. Anything older than 1,024 tokens is forgotten. Too short a context means the model can't even see the whole article intro it's continuing.
-- **But attention cost grows with the *square* of the context.** Every token is scored against every earlier token, so the attention grid is `t × t` per head (Section 11.5). Doubling the context from 512 to 1,024 makes that grid **4× bigger** (512 × 512 = 262,144 scores vs 1,024 × 1,024 = 1,048,576), per head, per layer, per chunk. That means more GPU memory and slower training, and this project trains on a single 12 GB graphics card.
+- **But attention cost grows with the *square* of the context.** Every token is scored against every earlier token, so the attention grid is `t × t` per head (Section 11.5). Doubling the context from 512 to 1,024 makes that grid **4× bigger** (512 × 512 = 262,144 scores vs 1,024 × 1,024 = 1,048,576), per head, per block, per chunk. That means more GPU memory and slower training, and this project trains on a single 12 GB graphics card.
 - **The position table itself is cheap.** 1,024 × 768 = 786,432 knobs, under 1% of the model's ~98 million. Most of the cost of a longer context is the attention grid, not the table.
 - **Why this value and not 1,000?** Context lengths are almost always powers of two (512, 1,024, 2,048, ...), because GPUs handle those sizes efficiently. 1,024 is also the context length the well-known GPT-2 model used.
 - **The model can only use positions it has a row for.** Row 1,023 is the last one. Position 1,024 would have no row, so the model can't be fed more than 1,024 tokens at once. That's why `generate.py` keeps only the **last** 1,024 tokens when text gets longer (Section 18.3).
@@ -1090,7 +1092,7 @@ Every block contains **4 Linear layers**. These are all of them (from `model.py`
 
 | Where | Name in `model.py` | Shape `(out, in)` | Neurons (outputs) | Connections each | Bias? | What it's for |
 |---|---|---|---|---|---|---|
-| Attention | `qkv` | (2,304, 768) | 2,304 | 768 | no | makes Q, K and V for every token (3 × 768) (Chapter 11) |
+| Attention | `qkv` | (2,304, 768) | 2,304 | 768 | no | makes Q, K and V for every token (3 × 768; Chapter 11) |
 | Attention | `proj` | (768, 768) | 768 | 768 | no | the projection that mixes the 12 heads' results (Section 11.5) |
 | MLP | `mlp[0]` ("Linear 1") | (3,072, 768) | 3,072 | 768 | yes | widens each token's vector to 4× its size (Section 12.1) |
 | MLP | `mlp[2]` ("Linear 2") | (768, 3,072) | 768 | 3,072 | yes | narrows it back to 768 (Section 12.1) |
@@ -1135,7 +1137,7 @@ This box is repeated 12 times, and that repetition is the "12 layers" in the mod
 > 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
 
 
-> 🧒 **ELI5:** Multiplying and adding alone can only make straight-line patterns, no matter how many layers you stack. GELU is a simple function applied to every number: positive numbers mostly stay the same, and negative numbers get pushed close to zero. That small change lets the model learn more complicated patterns.
+> 🧒 **ELI5:** Multiplying and adding alone can only make straight-line patterns, no matter how many Linear layers you stack. GELU is a simple function applied to every number: positive numbers mostly stay the same, and negative numbers get pushed close to zero. That small change lets the model learn more complicated patterns.
 
 ### 9.1 Why we need something that isn't a straight line
 
@@ -1178,11 +1180,11 @@ It's like a dimmer switch: big positive values pass almost unchanged, big negati
 > 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
 
 
-> 🧒 **ELI5:** After many layers, the numbers can get too big or too small, and that makes training unstable. LayerNorm fixes this by adjusting each list of numbers so that its average is 0 and the numbers are spread out by about 1.
+> 🧒 **ELI5:** After many blocks, the numbers can get too big or too small, and that makes training unstable. LayerNorm fixes this by adjusting each list of numbers so that its average is 0 and the numbers are spread out by about 1.
 
 ### 10.1 The problem
 
-As numbers pass through many layers, they can drift. Some vectors get huge, others shrink to nothing, and training becomes unstable.
+As numbers pass through many blocks, they can drift. Some vectors get huge, others shrink to nothing, and training becomes unstable.
 
 ### 10.2 The fix
 
@@ -1365,21 +1367,21 @@ Some common shapes that people find in real models:
 | **Repeat / induction** | stripe pointing to the token *after* an earlier copy of the current word | helps the model copy patterns it saw earlier in the text |
 | **Broad / diffuse** | weights spread thinly over many tokens | averages over a lot of context, like a summary |
 
-There is one pattern per head, per layer, per piece of text, so the full set for a 12-layer, 12-head model on a 1,024-token chunk is 144 grids of 1,024 × 1,024. These are the `(b, h, t, t)` attention scores from earlier, after the softmax.
+There is one pattern per head, per block, per piece of text, so the full set for this model (12 blocks × 12 heads) on a 1,024-token chunk is 144 grids of 1,024 × 1,024. These are the `(b, h, t, t)` attention scores from earlier, after the softmax.
 
-**Caveats.** An attention pattern shows where a head *reads from*, not what it *does* with what it reads: the Values and the later layers still matter. So a pattern is a useful clue, not a full explanation, and many heads have no clean label.
+**Caveats.** An attention pattern shows where a head *reads from*, not what it *does* with what it reads: the Values and the later blocks still matter. So a pattern is a useful clue, not a full explanation, and many heads have no clean label.
 
 > 📌 **In this project:** nothing here extracts or plots attention patterns. `F.scaled_dot_product_attention` computes the weights internally and returns only the final mixed output, so the `t × t` grid is never kept. Seeing the patterns would need extra code, such as writing attention by hand (like the handwritten version in Chapter 15) so the grid can be saved and plotted.
 
 #### Why 12 small heads instead of 1 big one?
 
-The cost is about the same. 12 heads of width 64 do roughly the same amount of arithmetic as one head of width 768, since each head's slice is 12× smaller. So splitting is nearly free, but it gives the model 12 independent attention patterns per layer instead of 1. With 12 layers, that's 144 heads in the model.
+The cost is about the same. 12 heads of width 64 do roughly the same amount of arithmetic as one head of width 768, since each head's slice is 12× smaller. So splitting is nearly free, but it gives the model 12 independent attention patterns per block instead of 1. With 12 blocks, that's 144 heads in the model.
 
 > 💡 **In one line:** a head is one independent attention run on a 64-number slice of each token. 12 heads means 12 different ways of deciding who to look at, glued together and mixed by the projection.
 
 ### 11.6 In the code
 
-> 📁 `model.py:16-20`
+> 📁 `model.py:17-20`
 > ```python
 > b, t, c = x.shape
 > q, k, v = self.qkv(self.norm1(x)).view(b, t, 3, self.heads, c // self.heads).permute(2, 0, 3, 1, 4).unbind(0)
@@ -1412,11 +1414,11 @@ Line by line:
 > 📌 **This guide's model (the `big` run):** width 768 · 12 layers · 12 heads (64 each) · context 1,024 · vocab 16,384 · **~98 million knobs** (12.6M token table + 0.8M position table + 12 blocks × 7.1M ≈ 85M). Full count in [Section 12.4](#124-where-the-98-million-knobs-live).
 
 
-> 🧒 **ELI5:** The MLP is two Linear layers with GELU in between. It works on each word by itself, after attention has given that word information from the other words. A residual connection means each layer's result is added to its input instead of replacing it, so information from earlier layers isn't lost.
+> 🧒 **ELI5:** The MLP is two Linear layers with GELU in between. It works on each word by itself, after attention has given that word information from the other words. A residual connection means the result of each step (attention or MLP) is added to its input instead of replacing it, so information from earlier blocks isn't lost.
 
 ### 12.1 The MLP: thinking about what you gathered
 
-**MLP** = **M**ulti-**L**ayer **P**erceptron (an old name for "a few linear layers with activations in between"). In each block:
+**MLP** = **M**ulti-**L**ayer **P**erceptron (an old name for "a few Linear layers with activations in between"). In each block:
 
 ```
 768 numbers → Linear → 3072 numbers → GELU → Linear → 768 numbers
@@ -1431,13 +1433,13 @@ It widens 4×, squishes, and narrows back. Attention *moves* information between
 > | Column | What it is | Full size in the `big` model |
 > |---|---|---|
 > | Input features | the numbers coming into the MLP for one token | 768 |
-> | Hidden neurons | the outputs of Linear 1 (then GELU), the "widened" layer | 3,072 (= 4 × 768) |
+> | Hidden neurons | the outputs of Linear 1 (then GELU), the "widened" hidden layer | 3,072 (= 4 × 768) |
 > | Output features | the outputs of Linear 2, which the residual adds back | 768 |
 >
 > - **Each line is one weight.** It's a single number inside Linear 1's `W` (the left half of the picture) or Linear 2's `W` (the right half). Training adjusted every one of them.
 > - **Red = positive weight, blue = negative weight.** Positive means "more of this input pushes this neuron up". Negative means "it pushes it down". Neither is "good" or "bad".
 > - **Brighter = bigger magnitude** (size ignoring the sign). A brighter line has more influence.
-> - **It's a sample, not the whole layer.** It draws 32 inputs, 48 hidden neurons and 32 outputs: 32×48 + 48×32 = 3,072 lines. The real Block 1 MLP has 768×3,072 + 3,072×768 ≈ 4.7 million weights, far too many to draw.
+> - **It's a sample, not the whole MLP.** It draws 32 inputs, 48 hidden neurons and 32 outputs: 32×48 + 48×32 = 3,072 lines. The real Block 1 MLP has 768×3,072 + 3,072×768 ≈ 4.7 million weights, far too many to draw.
 > - **It shows weights, not activity.** These lines are the fixed knobs from the latest saved checkpoint, so they stay the same whatever prompt you type. What does change with each prompt are the *values* flowing through them (the **activations**), and this panel doesn't draw those. Attention, biases, LayerNorm and residuals aren't drawn either.
 > - **Block menu:** each of the 12 blocks has its own MLP with its own weights. Switch blocks and the pattern changes.
 >
@@ -1449,19 +1451,19 @@ Instead of `x = layer(x)`, every block does:
 ```
 x = x + layer(x)
 ```
-The layer only has to learn a **correction** to add, not rebuild everything from scratch. Think of 12 editors each making small notes on the same document, instead of each one rewriting it.
+Here `layer` is the attention step or the MLP step inside the block (Section 8.3), so each block has two residuals. The step only has to learn a **correction** to add, not rebuild everything from scratch. Think of 24 editors (2 per block × 12 blocks) each making small notes on the same document, instead of each one rewriting it.
 
 There's a second big benefit you'll see in Chapter 14: during backprop, the `+` acts as a **highway**. The learning signal can flow straight back through all 12 blocks without fading out.
 
 ### 12.3 One complete block
 
 > 📁 `model.py:16-21`, rewritten with names:
-```
-h1 = LayerNorm1(x)
-x1 = x  + Attention(h1)          ← residual #1
-h2 = LayerNorm2(x1)
-x2 = x1 + MLP(h2)                ← residual #2
-```
+> ```
+> h1 = LayerNorm1(x)
+> x1 = x  + Attention(h1)          ← residual #1
+> h2 = LayerNorm2(x1)
+> x2 = x1 + MLP(h2)                ← residual #2
+> ```
 This "normalize, then do the thing, then add back" pattern is called **pre-norm**.
 
 ### 12.4 Where the 98 million knobs live
@@ -1497,7 +1499,7 @@ Most of the knobs sit in the blocks: 85 M of the 98 M (about 86%). The embedding
 
 After the final LayerNorm, each position has a 768-number vector. To score every possible next token, the model compares that vector against **every row of the token embedding table** (dot product). That gives 16,384 raw scores, called **logits**. A higher logit means "more likely next".
 
-**Tied embeddings:** the *same* table is used to read tokens in and to score tokens out. That saves 8.4 million knobs and makes sense: a token's meaning vector is useful in both directions.
+**Tied embeddings:** the *same* table is used to read tokens in and to score tokens out. That saves 12.6 million knobs (16,384 × 768) and makes sense: a token's meaning vector is useful in both directions.
 
 > 📁 `model.py:43`: `return F.linear(self.norm(self.blocks(x)), self.tokens.weight)`
 
@@ -1858,7 +1860,7 @@ loss
       ├─► dE   += dlogits.T @ xf    (tied head)         [15.2 + Rule 1]
       └─► dxf  = dlogits @ E
            └─► final LayerNorm backward → dx             [15.5]
-                for block = 8, 7, …, 1:
+                for block = 12, 11, …, 1:
                   MLP:  Linear2 → GELU → Linear1 → LN2   [15.2, 15.3, 15.5]
                   dx1 = dx + (that result)               [15.4]
                   Attn: proj → attention → qkv → LN1     [15.7, 15.5]
@@ -1925,7 +1927,7 @@ It's slow (two forward passes per knob), so only spot-check a few knobs.
 
 > 🧒 **ELI5:** Training repeats the same steps many times: take some text, let the model guess the next tokens, measure the error, use backpropagation to find how each weight affected it, and change the weights a little. Every so often, test the model on text it has never trained on to check it's really improving.
 
-> 📁 **In the code:** `train.py`, lines 129–167. Let's walk through each piece.
+> 📁 **In the code:** `train.py`, lines 139–182. Let's walk through each piece.
 
 ### 17.1 Making a batch: inputs and answers
 
@@ -1936,7 +1938,7 @@ tokens:  [The] [cat] [sat] [on] [the] [mat]
 input:   [The] [cat] [sat] [on] [the]
 answer:  [cat] [sat] [on]  [the] [mat]
 ```
-One chunk of 1,024 tokens = **1,024 prediction quizzes** at once. (`train.py:97`: `return data[:, :-1], data[:, 1:]`)
+One chunk of 1,024 tokens = **1,024 prediction quizzes** at once. (`train.py:124`: `return data[:, :-1], data[:, 1:]`)
 
 **Batch:** process several chunks at once (`--batch`; the `big` run uses `--batch 16`). The GPU (**G**raphics **P**rocessing **U**nit) is great at doing many things in parallel.
 
@@ -2005,16 +2007,16 @@ Interesting fact: on step 1, Adam moves every knob by about **±lr**, regardless
 > 📁 `training_utils.py`, `learning_rate()`
 
 ```
- LR
-3e-4 ┤      ╭──╮
-     │     ╱    ╲
-     │    ╱      ╲__
-1.5e-4┤  ╱           ╲___
-     │  ╱                ╲____
-3e-5 ┤ ╱                      ╲________________________
-     └┬────┬──────────────────────────────┬────────────► step
-      0  2,000                         275,000
-      warmup         cosine decay            (stays at min)
+  LR
+3e-4   ┤      ╭──╮
+       │     ╱    ╲
+       │    ╱      ╲__
+1.5e-4 ┤   ╱          ╲___
+       │  ╱               ╲____
+3e-5   ┤ ╱                     ╲________________________
+       └┬────┬───────────────────────┬──────────────────► step
+        0  2,000                  275,000
+        warmup    cosine decay            (stays at min)
 ```
 
 | Step | 1 | 1,000 | 2,000 | 70,250 | 138,500 | 206,750 | 275,000 | 300,000 |
@@ -2044,7 +2046,7 @@ The **GradScaler** is only needed for fp16. Tiny gradients can round to 0 in fp1
 
 > 🧒 **ELI5:** We test the model on text it never trained on. If the model keeps getting better on its training text but worse on this new text, it is memorizing instead of learning. That's called overfitting.
 
-Every 50 steps (`--eval-every`), `train.py` computes the loss on **val** data, which the model never trained on:
+Every 1,000 steps in the `big` run (`--eval-every 1000`; the default is 50), `train.py` computes the loss on **val** data, which the model never trained on:
 
 ```
 loss
@@ -2086,7 +2088,7 @@ It writes to a temporary file first and then renames it, so a crash mid-save can
 
 > 🧒 **ELI5:** To write text, the model picks the next token at random, but tokens with higher chances get picked more often. Temperature changes this: low temperature makes it almost always pick the most likely token, and high temperature makes less likely tokens get picked more often.
 
-> 📁 `generate.py`, lines 47–56
+> 📁 `generate.py`, lines 47–58
 
 ```
 1. Encode the prompt → token IDs
@@ -2363,7 +2365,7 @@ Train a tiny model (width 64, 2 layers, context 64) on a slice of `val.bin` for 
 
 | Term | Meaning |
 |---|---|
-| **Activation function** | A non-linear function between layers (GELU here) so the network can learn curves. |
+| **Activation function** | A non-linear function between Linear layers (GELU here) so the network can learn curves. |
 | **AdamW** | **Ada**ptive **M**oment estimation with decoupled **W**eight decay. The optimizer: momentum + per-knob step sizes + weight decay. |
 | **AMP** | **A**utomatic **M**ixed **P**recision. Do math in 16-bit, keep the knobs in 32-bit. |
 | **Attention** | The mechanism that lets each token pull information from earlier tokens using Q, K, V. |
@@ -2372,6 +2374,7 @@ Train a tiny model (width 64, 2 layers, context 64) on a slice of `val.bin` for 
 | **Backprop** | **Back**propagation. Computing all gradients by applying the chain rule from the loss backward. |
 | **Batch** | Several text chunks processed together. |
 | **bf16 / fp16 / fp32** | 16-bit "brain float" / 16-bit float / 32-bit float number formats. |
+| **Block** | One repeated unit of the model: LayerNorm → attention → residual, then LayerNorm → MLP → residual. The model stacks 12. The `layers` setting counts blocks. |
 | **Bias** | A learned vector added after a matrix multiply. |
 | **BPE** | **B**yte **P**air **E**ncoding. Build a vocabulary by repeatedly merging the most common pair. |
 | **Byte** | A number from 0 to 255. All computer text is stored as bytes. |
@@ -2398,9 +2401,11 @@ Train a tiny model (width 64, 2 layers, context 64) on a slice of `val.bin` for 
 | **Gradient accumulation** | Summing gradients over several small batches before one update. |
 | **Gradient descent** | Repeatedly stepping knobs opposite to their gradient. |
 | **Hash (SHA-256)** | **S**ecure **H**ash **A**lgorithm. Turns any data into a fixed "fingerprint" number. |
-| **Head** | One of several parallel attention units (8 here). |
+| **Head** | One of several parallel attention units (12 per block here). |
 | **HF** | **H**ugging **F**ace. Makers of the `tokenizers` and `datasets` libraries. |
+| **Hidden layer / hidden neurons** | Values in between the input and the output. Here: the 3,072 numbers in the middle of each MLP. |
 | **JSON** | **J**ava**S**cript **O**bject **N**otation. A simple text format for data. |
+| **Layer** | Used loosely: a Linear layer, a block ("12 layers"), or one step inside a block. Section 8.3 lists every meaning. |
 | **LayerNorm** | Rescales each token's vector to mean 0 and spread 1, then applies a learned scale and shift. |
 | **Learning rate (LR)** | The step size for knob updates. |
 | **Linear layer** | `y = x @ W.T + b`. A learned weighted mixing of inputs. |
@@ -2409,6 +2414,7 @@ Train a tiny model (width 64, 2 layers, context 64) on a slice of `val.bin` for 
 | **Loss** | A single number measuring how wrong the model is. Lower is better. |
 | **MLP** | **M**ulti-**L**ayer **P**erceptron. Linear → activation → Linear. |
 | **Momentum** | A running average of gradients used to smooth updates. |
+| **Neuron** | One output number of a Linear layer: one row of `W` (its weights, or connections) plus its bias. |
 | **Optimizer** | The algorithm that updates knobs from gradients (AdamW). |
 | **Overfitting** | Memorizing the training data: train loss falls while val loss rises. |
 | **Parameters / weights** | The learned numbers ("knobs"). About 98 M here. |
@@ -2416,7 +2422,7 @@ Train a tiny model (width 64, 2 layers, context 64) on a slice of `val.bin` for 
 | **Projection** | The Linear layer after attention that mixes the heads together. |
 | **PyTorch** | The Python deep-learning library used here. |
 | **QKV** | **Q**uery, **K**ey, **V**alue: the three vectors used in attention. |
-| **Residual connection** | `x + f(x)`: a shortcut that adds a layer's output to its input. |
+| **Residual connection** | `x + f(x)`: a shortcut that adds a step's output (attention or MLP) to its input. |
 | **SDPA** | **S**caled **D**ot-**P**roduct **A**ttention (PyTorch's fast attention function). |
 | **SGD** | **S**tochastic **G**radient **D**escent. The simplest optimizer. |
 | **Softmax** | Turns scores into probabilities: `exp(z_i)/Σexp(z_j)`. |
@@ -2446,11 +2452,12 @@ Train a tiny model (width 64, 2 layers, context 64) on a slice of `val.bin` for 
 | `model.py` | The GPT model (43 lines) | 6–13 |
 | `training_utils.py` | Learning-rate schedule, block sampler, resume checks | 17 |
 | `train.py` | The pre-training loop | 17 |
-| `train_full.py` | Continues training on the full dataset from the pilot weights | 17 |
+| `train_full.py` | Starts or resumes the first model's (`runs/full`) full-Wikipedia stage with fixed settings. The `big` run is started with `train.py` directly | 17 |
 | `generate.py` | Text generation (temperature, top-k) | 18 |
 | `dialogue.py` | Formats conversations and labels (`-100` masking) | 19 |
 | `prepare_dialogue.py`, `train_dialogue.py` | The dialogue fine-tuning stage | 19 |
-| `evaluate.py` | Computes validation loss for a checkpoint | 17.8 |
+| `evaluate.py` | Saves sample text from fixed prompts for each new checkpoint | 18 |
+| `val_loss.py` | Computes validation loss for a checkpoint | 17.8 |
 | `inspect_model.py` | Looks inside the model's weights | n/a |
 | `dashboard.py`, `dashboard/` | Local web interface: charts, samples, chat, library | n/a |
 | `library.py` | Offline search over saved articles | n/a |
