@@ -1,5 +1,16 @@
 # daniellm
 
+## at a glance
+
+| | |
+|---|---|
+| **model** | 98M-parameter GPT-style decoder (98,388,480 weights), trained from random initialization. 12 layers, width 768, 12 heads, 1,024-token context, 16,384-token byte-level BPE vocabulary, tied input/output embeddings |
+| **data** | English Wikipedia (`wikimedia/wikipedia`, 20231101.en snapshot), about 4.5B tokens after tokenizing |
+| **training** | one pass over that data: 275,000 steps × 16,384 tokens per step ≈ 4.5B tokens. AdamW (weight decay 0.1), learning rate 3e-4 with 2,000 warmup steps decaying to 3e-5, bf16 autocast, on one RTX 4070 Ti (12 GB) at ~60k tokens/s, about 21 hours |
+| **results** | still training (`runs/big`), so no final numbers yet. the earlier 34M model finished a pass over the same ~4.5B tokens, and it repeats itself and makes things up. training losses are in the run logs, which aren't committed |
+
+"from scratch" means the weights: no pretrained model is used. the tokenizer training and backprop are library code (huggingface `tokenizers`, pytorch autograd).
+
 i went down an ai rabbit hole and now i'm a little scared they're gonna take over the world. so i'm building one from scratch (somewhat). hopefully it'll be my in with the machines if things get weird.
 
 in case the world actually ends, i'd like a quick little everything guide on hand, and preferably one that doesn't ask me to renew a subscription. i know i could just host a pre-trained llm locally, but wheres the fun in that? instead, i made a useless model that kinda just spits out nonsense. so much for survival of the fittest.
